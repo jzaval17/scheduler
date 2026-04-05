@@ -293,6 +293,10 @@ body {
 .sb-overdue   { background: var(--danger-light); color: var(--danger); }
 .sb-upcoming  { background: var(--gray-100); color: var(--gray-600); }
 
+/* Emphasize breaks/lunches that are due soon */
+.sb-soon { background: #FFF8E1; color: var(--amber); font-weight: 800; border: 1px solid rgba(230,81,0,0.08); }
+.person-card.soon { box-shadow: 0 2px 10px rgba(230,81,0,0.06); border-left: 4px solid var(--amber); }
+
 /* ── Empty state ── */
 .empty-state {
   text-align: center;

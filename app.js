@@ -5,6 +5,8 @@ const ZONE_LABELS = { checklanes: 'Checklanes', sco: 'SCO', service: 'Service De
 const BREAK_DUR = { break: 15, lunch: 45, lunch60: 60 };
 const LUNCH_WARN_MIN = 10; // minutes before the 5-hour mark to warn about lunch
 const NOTE_PREVIEW_LEN = 120;
+// How soon (ms) before a scheduled break/lunch to mark 'due soon' on cards
+const UPCOMING_SOON_MS = 15 * 60 * 1000; // 15 minutes
 
 // The Anthropic API key is no longer stored in the client. Requests
 // are proxied to a server-side function at `/api/anthropic` which reads
@@ -325,7 +327,8 @@ function renderBoard() {
       const activeBreak = p.breaks ? p.breaks.find(b => b.status === 'active' || b.status === 'overdue') : null;
       const next = getNextScheduledBreak(p);
       let avClass = 'av-available', sbClass = 'sb-available', sbLabel = 'Available';
-      let timerText = next ? `Next: ${next.scheduledTime || ''}` : '';
+      let timerText = '';
+      let soonFlag = false;
 
       if (activeBreak) {
         const elapsed = activeBreak.startMs ? Math.floor((Date.now() - activeBreak.startMs) / 60000) : 0;
@@ -343,6 +346,22 @@ function renderBoard() {
         // show clocked out in the small status badge
         sbClass = 'sb-upcoming';
         sbLabel = 'Clocked out';
+      }
+
+      // If person is available, show next scheduled time or mark 'due soon' when within UPCOMING_SOON_MS
+      if (!activeBreak && p.status === 'available' && next && next.scheduledMs) {
+        const delta = next.scheduledMs - Date.now();
+        if (delta > 0 && delta <= UPCOMING_SOON_MS) {
+          const mins = Math.max(1, Math.round(delta / 60000));
+          sbClass = 'sb-soon';
+          sbLabel = `${next.type === 'lunch' ? 'Lunch' : 'Break'} due in ${mins}m`;
+          timerText = `${mins}m until ${next.type === 'lunch' ? 'lunch' : 'break'}`;
+          soonFlag = true;
+        } else {
+          timerText = `Next: ${next.scheduledTime || ''}`;
+        }
+      } else if (!activeBreak && next) {
+        timerText = `Next: ${next.scheduledTime || ''}`;
       }
 
       // removed taken checkmark -- using compact break dots instead
@@ -411,7 +430,9 @@ function renderBoard() {
 
         // Add an upbeat animation class when a break is actively running
         const animClass = (activeBreak && activeBreak.status === 'active') ? ' active-anim' : '';
+        const soonClass = soonFlag ? ' soon' : '';
         card.innerHTML = `<div class="avatar ${avClass}${animClass}">${initials(p.name)}</div><div class="person-info"><div class="person-name">${availHtml} ${p.name} ${takenHtml} ${lateHtml} ${absentHtml} ${clockOutHtml}</div>${breakBadges}${paidHtml}<div class="person-timer${p.status === 'overdue' ? ' overdue' : ''}">${timerText}</div>${noteHtml}${editorHtml}${actions}</div><span class="status-badge ${sbClass}">${sbLabel}</span>`;
+        if (soonFlag) card.classList.add('soon');
         card.onclick = () => openModal(p.id);
       list.appendChild(card);
     });
@@ -1283,6 +1304,7 @@ function sendPushNotification(title, body) {
     new Notification(title, { body, icon: '/icons/icon-192.png' });
 }
 let notifiedPush = new Set();
+let scheduledTriggers = new Set(); // track break ids we've tried to schedule via SW
 function checkPushNotifications() {
   if (!('Notification' in window)) return;
   // Notify for active/overdue breaks
@@ -1316,6 +1338,24 @@ function checkPushNotifications() {
             pushAlert({ id: key, type: 'info', msg: `${p.name}'s ${b.type} is due — ${ZONE_LABELS[p.zone]}`, personId: p.id });
           }
         }
+        // Attempt to schedule a service-worker-triggered notification for future scheduled breaks
+        else if (b.status === 'scheduled' && b.scheduledMs && b.scheduledMs > now) {
+          const key = 'trigger:' + b.id;
+          if (!scheduledTriggers.has(key) && Notification.permission === 'granted' && 'serviceWorker' in navigator) {
+            // Best-effort: try to use the Notification Triggers API via the service worker
+            try {
+              navigator.serviceWorker.getRegistration().then(reg => {
+                if (!reg) return;
+                // TimestampTrigger may be available in some browsers (Chrome). Use it when present.
+                if (typeof TimestampTrigger !== 'undefined') {
+                  const title = b.type === 'lunch' ? 'Lunch due' : 'Break due';
+                  reg.showNotification(title, { body: `${p.name}'s ${b.type} is due — ${ZONE_LABELS[p.zone]}`, tag: key, showTrigger: new TimestampTrigger(b.scheduledMs), data: { personId: p.id, breakId: b.id } });
+                  scheduledTriggers.add(key);
+                }
+              }).catch(() => {});
+            } catch (e) {}
+          }
+        }
       });
     }
   });
@@ -1342,6 +1382,20 @@ function checkPushNotifications() {
     if (!p) { notifiedPush.delete(key); return; }
     if (type === 'overdue' && p.status !== 'overdue') notifiedPush.delete(key);
     if (type === 'clockout' && !p.clockOutOverdue) notifiedPush.delete(key);
+  });
+  // Cleanup scheduledTriggers when the break/person no longer exists or condition changed
+  scheduledTriggers.forEach(key => {
+    const id = key.split(':')[1];
+    let found = false;
+    for (const p of people) {
+      const b = (p.breaks || []).find(x => x.id === id);
+      if (b) {
+        found = true;
+        if (!(b.status === 'scheduled' && b.scheduledMs && b.scheduledMs > Date.now())) scheduledTriggers.delete(key);
+        break;
+      }
+    }
+    if (!found) scheduledTriggers.delete(key);
   });
   // If notifications aren't granted, optionally request once
   if (Notification.permission === 'default') {
