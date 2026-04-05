@@ -3,6 +3,7 @@ const ZONE_MAX = { checklanes: 10, sco: 2, service: 1, driveup: 5 };
 const TOTAL_ON_BREAK_MAX = 3; // overall max people on break before critical warning
 const ZONE_LABELS = { checklanes: 'Checklanes', sco: 'SCO', service: 'Service Desk', driveup: 'Drive Up' };
 const BREAK_DUR = { break: 15, lunch: 45, lunch60: 60 };
+const LUNCH_WARN_MIN = 10; // minutes before the 5-hour mark to warn about lunch
 const NOTE_PREVIEW_LEN = 120;
 
 // The Anthropic API key is no longer stored in the client. Requests
@@ -261,6 +262,26 @@ function tick() {
     } else {
       p.clockOutOverdue = false; p.shouldClockOut = false;
     }
+    // Lunch warning: if shiftStart exists and no lunch taken, warn when close to 5-hour mark
+    if (p.shiftStartMs) {
+      const fiveHourMs = p.shiftStartMs + 5 * 3600000;
+      const warnWindowStart = fiveHourMs - (LUNCH_WARN_MIN * 60000);
+      const nowLocal = Date.now();
+      const hasLunch = (p.breaks || []).some(b => b.type === 'lunch' && (b.status === 'done' || b.status === 'active' || b.status === 'overdue'));
+      if (!hasLunch && nowLocal >= warnWindowStart && nowLocal < fiveHourMs) {
+        const id = 'lunch-warn-' + p.id;
+        pushAlert({ id, type: 'info', msg: `${p.name} is approaching 5 hours — consider sending to lunch`, personId: p.id });
+        try {
+          if (window.Notification && Notification.permission === 'granted') {
+            window.__sentNotifications = window.__sentNotifications || new Set();
+            if (!window.__sentNotifications.has(id)) {
+              new Notification('Send to lunch', { body: `${p.name} is close to 5 hours — consider sending to lunch`, tag: id });
+              window.__sentNotifications.add(id);
+            }
+          }
+        } catch (e) {}
+      }
+    }
     syncPersonStatus(p);
   });
   if (changed) saveState();
@@ -282,12 +303,7 @@ function renderBoard() {
     if (!list) return;
 
     const zp = people.filter(p => p.zone === zone);
-    } else if (p.status === 'available') {
-      // Only count truly available people (not absent and not manually clocked out)
-      if (!p.absent && !p.clockedOut) avail++;
-    } else if (p.status === 'clocked_out') {
-      // do not count as available
-    }
+    const onBreak = zp.filter(p => isActive(p)).length;
     const max = ZONE_MAX[zone];
 
     if (pill) {
