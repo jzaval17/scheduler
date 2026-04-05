@@ -224,6 +224,26 @@ function tick() {
         }
       }
     });
+    // Check shift end (clock-out) status
+    if (p.shiftEndMs) {
+      if (now > p.shiftEndMs) {
+        // Person's shift has ended
+        if (p.status !== 'available') {
+          p.clockOutOverdue = true; // still on break/lunch after shift end
+          p.shouldClockOut = false;
+          pushAlert({ id: 'clockout-overdue-' + p.id, type: 'urgent', msg: `${p.name} is overdue to clock out — shift ended ${fmtTime(p.shiftEndMs)}`, personId: p.id });
+        } else {
+          // Shift ended and person is available (not on break) — should clock out
+          p.shouldClockOut = true;
+          p.clockOutOverdue = false;
+          pushAlert({ id: 'clockout-due-' + p.id, type: 'info', msg: `${p.name} should clock out — shift ended ${fmtTime(p.shiftEndMs)}`, personId: p.id });
+        }
+      } else {
+        p.clockOutOverdue = false; p.shouldClockOut = false;
+      }
+    } else {
+      p.clockOutOverdue = false; p.shouldClockOut = false;
+    }
     syncPersonStatus(p);
   });
   if (changed) saveState();
@@ -286,6 +306,7 @@ function renderBoard() {
       const takenHtml = taken ? '<span class="taken-badge">✓</span>' : '';
       const lateHtml = p.late ? '<span class="person-flag late">Late</span>' : '';
       const absentHtml = p.absent ? '<span class="person-flag absent">Absent</span>' : '';
+      const clockOutHtml = p.clockOutOverdue ? '<span class="person-flag absent">Overtime</span>' : (p.shouldClockOut ? '<span class="person-flag late">Clock out</span>' : '');
       // Availability sign: always show, with color variant based on current status
       let availClass = 'avail-available';
       if (p.status === 'break') availClass = 'avail-break';
@@ -321,7 +342,7 @@ function renderBoard() {
 
         // Add an upbeat animation class when a break is actively running
         const animClass = (activeBreak && activeBreak.status === 'active') ? ' active-anim' : '';
-        card.innerHTML = `<div class="avatar ${avClass}${animClass}">${initials(p.name)}</div><div class="person-info"><div class="person-name">${availHtml} ${p.name} ${takenHtml} ${lateHtml} ${absentHtml}</div>${paidHtml}<div class="person-timer${p.status === 'overdue' ? ' overdue' : ''}">${timerText}</div>${noteHtml}${editorHtml}${actions}</div><span class="status-badge ${sbClass}">${sbLabel}</span>`;
+        card.innerHTML = `<div class="avatar ${avClass}${animClass}">${initials(p.name)}</div><div class="person-info"><div class="person-name">${availHtml} ${p.name} ${takenHtml} ${lateHtml} ${absentHtml} ${clockOutHtml}</div>${paidHtml}<div class="person-timer${p.status === 'overdue' ? ' overdue' : ''}">${timerText}</div>${noteHtml}${editorHtml}${actions}</div><span class="status-badge ${sbClass}">${sbLabel}</span>`;
         card.onclick = () => openModal(p.id);
       list.appendChild(card);
     });
@@ -439,6 +460,19 @@ function renderAlerts() {
       msg: `${p.name} is ${over} min overdue from ${p.type} — ${ZONE_LABELS[p.zone]}`,
       actions: [{ label: 'Mark returned', fn: `markReturned('${p.id}')` }] });
   });
+  // Shift end (clock-out) alerts
+  people.forEach(p => {
+    if (p.shiftEndMs && Date.now() > p.shiftEndMs) {
+      if (p.status !== 'available') {
+        liveAlerts.push({ id: 'clockout-overdue-' + p.id, type: 'urgent',
+          msg: `${p.name} is overdue to clock out — shift ended ${fmtTime(p.shiftEndMs)}`,
+          actions: [{ label: 'Mark returned', fn: `markReturned('${p.id}')` }] });
+      } else {
+        liveAlerts.push({ id: 'clockout-due-' + p.id, type: 'info',
+          msg: `${p.name} should clock out — shift ended ${fmtTime(p.shiftEndMs)}` });
+      }
+    }
+  });
   Object.keys(ZONE_MAX).forEach(zone => {
     const cnt = people.filter(p => p.zone === zone && isActive(p)).length;
     if (cnt > ZONE_MAX[zone]) liveAlerts.push({ id: 'zone-' + zone, type: 'urgent',
@@ -471,10 +505,12 @@ function renderAlerts() {
 function renderAlertBanner() {
   const overdue = people.filter(p => p.status === 'overdue');
   const zoneOver = Object.keys(ZONE_MAX).some(zone => people.filter(p => p.zone === zone && isActive(p)).length > ZONE_MAX[zone]);
+  const clockOutOver = people.some(p => p.clockOutOverdue);
   const banner = document.getElementById('alert-banner');
   const text = document.getElementById('alert-text');
   if (!banner) return;
   if (overdue.length > 0) { banner.classList.remove('hidden'); text.textContent = `${overdue[0].name} is overdue from ${overdue[0].type} — tap for details`; }
+  else if (clockOutOver) { banner.classList.remove('hidden'); const p = people.find(x => x.clockOutOverdue); text.textContent = `${p.name} is overdue to clock out — tap for details`; }
   else if (zoneOver) { banner.classList.remove('hidden'); text.textContent = 'Coverage alert: too many on break in a zone'; }
   else { banner.classList.add('hidden'); }
 }
