@@ -66,6 +66,8 @@ function initials(name) {
   return name.trim().split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
 }
 function isActive(p) {
+  if (!p) return false;
+  if (p.absent) return false;
   return p.status === 'break' || p.status === 'lunch' || p.status === 'overdue';
 }
 function getElapsedMin(p) {
@@ -110,6 +112,16 @@ function syncPersonStatus(person) {
 function getNextScheduledBreak(person) {
   if (!person || !person.breaks) return null;
   const now = Date.now();
+  // Ensure scheduledMs is populated when possible by parsing scheduledTime
+  person.breaks.forEach(b => {
+    if ((!b.scheduledMs || b.scheduledMs === null) && b.scheduledTime) {
+      const parsed = parseMilTime(b.scheduledTime);
+      if (parsed) {
+        // set scheduledMs for future comparisons (mutates the object permanently)
+        b.scheduledMs = parsed.getTime();
+      }
+    }
+  });
   const scheduled = person.breaks.filter(b => b.status === 'scheduled' && b.scheduledMs && b.scheduledMs > now);
   if (scheduled.length === 0) return null;
   scheduled.sort((a, b) => a.scheduledMs - b.scheduledMs);
@@ -230,8 +242,8 @@ function tick() {
   const now = Date.now();
   people.forEach(p => {
     if (!p.breaks) return;
-    if (p.clockedOut) {
-      // Skip active break checks for manually clocked-out people
+    if (p.clockedOut || p.absent) {
+      // Skip active break checks for manually clocked-out people or absent team members
       p.clockOutOverdue = false; p.shouldClockOut = false; syncPersonStatus(p); return;
     }
     p.breaks.forEach(b => {
@@ -1309,6 +1321,7 @@ function checkPushNotifications() {
   if (!('Notification' in window)) return;
   // Notify for active/overdue breaks
   people.forEach(p => {
+    if (p.absent) return; // do not notify for absent team members
     // overdue break
     if (p.status === 'overdue') {
       const key = 'overdue:' + p.id;
