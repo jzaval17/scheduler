@@ -1154,12 +1154,41 @@ function sendPushNotification(title, body) {
   if ('Notification' in window && Notification.permission === 'granted')
     new Notification(title, { body, icon: '/icons/icon-192.png' });
 }
-let notifiedOverdue = new Set();
+let notifiedPush = new Set();
 function checkPushNotifications() {
-  people.filter(p => p.status === 'overdue').forEach(p => {
-    if (!notifiedOverdue.has(p.id)) { notifiedOverdue.add(p.id); sendPushNotification('Break overdue!', `${p.name} needs to return — ${ZONE_LABELS[p.zone]}`); }
+  if (!('Notification' in window)) return;
+  // Notify for active/overdue breaks
+  people.forEach(p => {
+    // overdue break
+    if (p.status === 'overdue') {
+      const key = 'overdue:' + p.id;
+      if (!notifiedPush.has(key) && Notification.permission === 'granted') {
+        notifiedPush.add(key);
+        sendPushNotification('Break overdue!', `${p.name} needs to return — ${ZONE_LABELS[p.zone]}`);
+      }
+    }
+    // clock-out overdue (shift ended but still on break/lunch)
+    if (p.clockOutOverdue) {
+      const key = 'clockout:' + p.id;
+      if (!notifiedPush.has(key) && Notification.permission === 'granted') {
+        notifiedPush.add(key);
+        sendPushNotification('Shift ended — clock out', `${p.name} still on break after shift end — ${ZONE_LABELS[p.zone]}`);
+      }
+    }
   });
-  notifiedOverdue.forEach(id => { const p = people.find(x => x.id === id); if (!p || !isActive(p)) notifiedOverdue.delete(id); });
+
+  // Cleanup notifiedPush entries when condition clears or person removed
+  notifiedPush.forEach(key => {
+    const [type, id] = key.split(':');
+    const p = people.find(x => x.id === id);
+    if (!p) { notifiedPush.delete(key); return; }
+    if (type === 'overdue' && p.status !== 'overdue') notifiedPush.delete(key);
+    if (type === 'clockout' && !p.clockOutOverdue) notifiedPush.delete(key);
+  });
+  // If notifications aren't granted, optionally request once
+  if (Notification.permission === 'default') {
+    Notification.requestPermission().catch(() => {});
+  }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────
