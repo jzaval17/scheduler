@@ -359,6 +359,7 @@ function renderBoard() {
       if (p.absent) { availLabel = 'Unavailable'; availClass = 'avail-absent'; }
       else if (p.status === 'break' || p.status === 'lunch' || p.status === 'overdue') { availLabel = 'Unavailable'; }
       else if (p.status === 'not_here') { availLabel = 'Not here'; }
+      else if (p.status === 'clocked_out') { availLabel = 'Clocked out'; availClass = 'avail-not-here'; }
       const availHtml = `<span class="avail-sign ${availClass}">${availLabel}</span>`;
       const shiftLine = (p.shiftStartMs && p.shiftEndMs) ? `${fmtTime(p.shiftStartMs)} — ${fmtTime(p.shiftEndMs)}` : '';
       const paid = computePaidHours(p);
@@ -657,7 +658,14 @@ function openModal(personId) {
     return `<div class="modal-break-row" style="display:flex;gap:8px;align-items:center;margin-top:8px"><div style="flex:1"><strong>${b.type.charAt(0).toUpperCase()+b.type.slice(1)}</strong><div style="font-size:12px;color:var(--gray-400)">Current: ${tval}</div></div><div style="width:42%"><input id="modal-break-time-${b.id}" class="form-input" value="${tval}"></div><div style="width:26%"><input id="modal-break-dur-${b.id}" class="form-input" value="${b.dur || (b.type==='lunch'?BREAK_DUR['lunch']:15)}"></div><div><button class="btn-tiny" onclick="event.stopPropagation();removeBreak('${p.id}','${b.id}');return false;">Remove</button></div></div>`;
   }).join('');
 
-  const statusLabel = p.status === 'not_here' ? 'Not here' : (p.status === 'available' ? 'Available' : (p.status === 'break' ? 'On break' : (p.status === 'lunch' ? 'Lunch' : (p.status === 'overdue' ? 'Overdue' : p.status.charAt(0).toUpperCase()+p.status.slice(1)))));
+  let statusLabel = '';
+  if (p.status === 'not_here') statusLabel = 'Not here';
+  else if (p.status === 'available') statusLabel = 'Available';
+  else if (p.status === 'break') statusLabel = 'On break';
+  else if (p.status === 'lunch') statusLabel = 'Lunch';
+  else if (p.status === 'overdue') statusLabel = 'Overdue';
+  else if (p.status === 'clocked_out') statusLabel = 'Clocked out';
+  else statusLabel = p.status ? (p.status.charAt(0).toUpperCase()+p.status.slice(1)) : '';
 
   body.innerHTML = `${actionsHtml}
     <div class="modal-info-row"><span class="modal-info-label">Status</span><span class="modal-info-value">${statusLabel}</span></div>
