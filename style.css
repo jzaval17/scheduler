@@ -260,6 +260,13 @@ body {
 /* Absent availability variant */
 .avail-absent { background: #FFF0F0; color: var(--danger); }
 
+/* Break badges (1st, Lunch, 2nd) */
+.break-badges { margin-top: 6px; display:flex; gap:6px; align-items:center; }
+.break-badge { font-size: 11px; padding: 3px 6px; border-radius: 10px; background: #F8F9FA; color: var(--gray-600); border: 1px solid var(--gray-200); font-weight:700; }
+.break-badge.br-done { background: var(--green-light); color: var(--green); border-color: transparent; }
+.break-badge.br-active { background: var(--amber-light); color: var(--amber); border-color: transparent; }
+.break-badge.br-overdue { background: var(--danger-light); color: var(--danger); border-color: transparent; }
+
 .status-badge {
   font-size: 11px; padding: 3px 9px; border-radius: 20px;
   font-weight: 600; white-space: nowrap; flex-shrink: 0;

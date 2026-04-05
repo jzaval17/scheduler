@@ -329,6 +329,25 @@ function renderBoard() {
       const paid = computePaidHours(p);
       const paidHtml = (paid !== null && paid !== undefined) ? `<div class="person-shift">${shiftLine} · ${paid} hrs</div>` : (shiftLine ? `<div class="person-shift">${shiftLine}</div>` : '');
 
+      // Build per-break badges (1st break, lunch, 2nd break) showing status
+      let breakBadges = '';
+      if (p.breaks && p.breaks.length > 0) {
+        const sorted = [...p.breaks].slice().sort((a, b) => (a.scheduledMs || 0) - (b.scheduledMs || 0));
+        let breakIdx = 0;
+        const badges = sorted.map(b => {
+          let label = b.type === 'lunch' ? 'Lunch' : (breakIdx === 0 ? '1st' : '2nd');
+          if (b.type !== 'lunch') breakIdx++;
+          let cls = 'br-sched';
+          let content = label;
+          if (b.status === 'done') { cls = 'br-done'; content = '✓'; }
+          else if (b.status === 'active') { cls = 'br-active'; content = 'In'; }
+          else if (b.status === 'overdue') { cls = 'br-overdue'; content = '!'; }
+          const title = `${label} ${b.scheduledTime || ''}`.trim();
+          return `<span class="break-badge ${cls}" title="${escapeHtml(title)}">${content}</span>`;
+        }).join('');
+        breakBadges = `<div class="break-badges">${badges}</div>`;
+      }
+
       const card = document.createElement('div');
       card.className = 'person-card' + (p.status === 'overdue' ? ' overdue' : '');
         // Note display or inline editor
@@ -354,7 +373,7 @@ function renderBoard() {
 
         // Add an upbeat animation class when a break is actively running
         const animClass = (activeBreak && activeBreak.status === 'active') ? ' active-anim' : '';
-        card.innerHTML = `<div class="avatar ${avClass}${animClass}">${initials(p.name)}</div><div class="person-info"><div class="person-name">${availHtml} ${p.name} ${takenHtml} ${lateHtml} ${absentHtml} ${clockOutHtml}</div>${paidHtml}<div class="person-timer${p.status === 'overdue' ? ' overdue' : ''}">${timerText}</div>${noteHtml}${editorHtml}${actions}</div><span class="status-badge ${sbClass}">${sbLabel}</span>`;
+        card.innerHTML = `<div class="avatar ${avClass}${animClass}">${initials(p.name)}</div><div class="person-info"><div class="person-name">${availHtml} ${p.name} ${takenHtml} ${lateHtml} ${absentHtml} ${clockOutHtml}</div>${breakBadges}${paidHtml}<div class="person-timer${p.status === 'overdue' ? ' overdue' : ''}">${timerText}</div>${noteHtml}${editorHtml}${actions}</div><span class="status-badge ${sbClass}">${sbLabel}</span>`;
         card.onclick = () => openModal(p.id);
       list.appendChild(card);
     });
