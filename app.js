@@ -79,6 +79,13 @@ function uid() { return Date.now() + Math.random().toString(36).slice(2, 7); }
 // Helpers for new data model: people have `breaks` array. Each break: { id, type, scheduledMs, scheduledTime, status: 'scheduled'|'active'|'overdue'|'done', startMs, dur }
 function syncPersonStatus(person) {
   if (!person || !person.breaks) return;
+  // Respect manual clock-out state
+  if (person.clockedOut) {
+    person.status = 'clocked_out';
+    person.type = null;
+    person.startMs = null;
+    return;
+  }
   const now = Date.now();
   const active = person.breaks.find(b => b.status === 'active' || b.status === 'overdue');
   if (active) {
@@ -220,6 +227,10 @@ function tick() {
   const now = Date.now();
   people.forEach(p => {
     if (!p.breaks) return;
+    if (p.clockedOut) {
+      // Skip active break checks for manually clocked-out people
+      p.clockOutOverdue = false; p.shouldClockOut = false; syncPersonStatus(p); return;
+    }
     p.breaks.forEach(b => {
       if (b.status === 'active' && b.startMs) {
         const elapsed = Math.floor((now - b.startMs) / 60000);
@@ -271,7 +282,12 @@ function renderBoard() {
     if (!list) return;
 
     const zp = people.filter(p => p.zone === zone);
-    const onBreak = zp.filter(p => isActive(p)).length;
+    } else if (p.status === 'available') {
+      // Only count truly available people (not absent and not manually clocked out)
+      if (!p.absent && !p.clockedOut) avail++;
+    } else if (p.status === 'clocked_out') {
+      // do not count as available
+    }
     const max = ZONE_MAX[zone];
 
     if (pill) {
@@ -309,9 +325,13 @@ function renderBoard() {
       }
 
       // removed taken checkmark -- using compact break dots instead
+      const takenHtml = '';
       const lateHtml = p.late ? '<span class="person-flag late">Late</span>' : '';
       const absentHtml = p.absent ? '<span class="person-flag absent">Absent</span>' : '';
-      const clockOutHtml = p.clockOutOverdue ? '<span class="person-flag absent">Overtime</span>' : (p.shouldClockOut ? '<span class="person-flag late">Clock out</span>' : '');
+      let clockOutHtml = '';
+      if (p.clockedOut) clockOutHtml = '<span class="person-flag absent">Clocked out</span>';
+      else if (p.clockOutOverdue) clockOutHtml = '<span class="person-flag absent">Overtime</span>';
+      else if (p.shouldClockOut) clockOutHtml = '<span class="person-flag late">Clock out</span>';
       // Availability sign: always show, with color variant based on current status
       let availClass = 'avail-available';
       if (p.status === 'break') availClass = 'avail-break';
@@ -365,7 +385,8 @@ function renderBoard() {
         }
 
         const editActions = `<button class="btn-tiny" onclick="event.stopPropagation();openModal('${p.id}')">Edit breaks</button>`;
-        const actions = `<div style="display:flex;gap:6px;margin-top:8px"><button class="btn-tiny" onclick="event.stopPropagation();startInline('${p.id}')">Edit</button><button class="btn-tiny" onclick="event.stopPropagation();toggleLate('${p.id}')">${p.late? 'Clear late':'Late'}</button><button class="btn-tiny" onclick="event.stopPropagation();toggleAbsent('${p.id}')">${p.absent? 'Clear absent':'Absent'}</button>${(next && next.scheduledMs && next.scheduledMs <= Date.now())?`<button class="btn-tiny" onclick="event.stopPropagation();markBreakDone('${p.id}')">Mark taken</button>`:''}${editActions}</div>`;
+        const clockOutBtn = (!p.clockedOut && (p.shouldClockOut || p.clockOutOverdue)) ? `<button class="btn-tiny" onclick="event.stopPropagation();manualClockOut('${p.id}')">Clock out</button>` : '';
+        const actions = `<div style="display:flex;gap:6px;margin-top:8px"><button class="btn-tiny" onclick="event.stopPropagation();startInline('${p.id}')">Edit</button><button class="btn-tiny" onclick="event.stopPropagation();toggleLate('${p.id}')">${p.late? 'Clear late':'Late'}</button><button class="btn-tiny" onclick="event.stopPropagation();toggleAbsent('${p.id}')">${p.absent? 'Clear absent':'Absent'}</button>${clockOutBtn}${(next && next.scheduledMs && next.scheduledMs <= Date.now())?`<button class="btn-tiny" onclick="event.stopPropagation();markBreakDone('${p.id}')">Mark taken</button>`:''}${editActions}</div>`;
 
         // Add an upbeat animation class when a break is actively running
         const animClass = (activeBreak && activeBreak.status === 'active') ? ' active-anim' : '';
@@ -414,9 +435,12 @@ function renderStats() {
     else if (p.absent) {
       absentCount++;
     } else if (p.status === 'available') {
-      avail++;
-      const next = getNextScheduledBreak(p);
-      if (next && (next.scheduledMs - now) < soon && (next.scheduledMs - now) > 0) upcoming++;
+      // Only count truly available people (not absent and not manually clocked out)
+      if (!p.absent && !p.clockedOut) {
+        avail++;
+        const next = getNextScheduledBreak(p);
+        if (next && (next.scheduledMs - now) < soon && (next.scheduledMs - now) > 0) upcoming++;
+      }
     }
   });
   const s = id => document.getElementById(id);
@@ -502,10 +526,11 @@ function renderAlerts() {
       if (p.status !== 'available') {
         liveAlerts.push({ id: 'clockout-overdue-' + p.id, type: 'urgent',
           msg: `${p.name} is overdue to clock out — shift ended ${fmtTime(p.shiftEndMs)}`,
-          actions: [{ label: 'Mark returned', fn: `markReturned('${p.id}')` }] });
+          actions: [{ label: 'Clock out', fn: `manualClockOut('${p.id}')` }] });
       } else {
         liveAlerts.push({ id: 'clockout-due-' + p.id, type: 'info',
-          msg: `${p.name} should clock out — shift ended ${fmtTime(p.shiftEndMs)}` });
+          msg: `${p.name} should clock out — shift ended ${fmtTime(p.shiftEndMs)}`,
+          actions: [{ label: 'Clock out', fn: `manualClockOut('${p.id}')` }] });
       }
     }
   });
@@ -601,6 +626,10 @@ function openModal(personId) {
     actionsHtml += `<div class="modal-action-row"><button class="modal-btn start-break" onclick="startBreak('${p.id}','break');closeModal()">Start ${BREAK_DUR['break']}-min break</button><button class="modal-btn start-lunch" onclick="startBreak('${p.id}','lunch');closeModal()">Start ${BREAK_DUR['lunch']}-min lunch</button></div>`;
   } else {
     actionsHtml += `<div class="modal-action-row"><button class="modal-btn mark-back" onclick="markReturned('${p.id}');closeModal()">Mark returned</button></div>`;
+  }
+  // Offer manual clock-out when shift has ended
+  if (!p.clockedOut && (p.shouldClockOut || p.clockOutOverdue)) {
+    actionsHtml += `<div class="modal-action-row"><button class="modal-btn ok" onclick="manualClockOut('${p.id}');closeModal()">Clock out</button></div>`;
   }
   if (hasDue) {
     actionsHtml += `<div class="modal-action-row"><button class="modal-btn ok" onclick="markBreakDone('${p.id}');closeModal()">Mark break taken</button></div>`;
@@ -699,6 +728,20 @@ function saveBreakEdits(personId) {
     if (!b.status) b.status = 'scheduled';
   });
   syncPersonStatus(p); saveState(); showToast('Breaks updated'); render();
+}
+
+function manualClockOut(personId) {
+  const p = people.find(x => x.id === personId);
+  if (!p) return;
+  p.clockedOut = true;
+  p.shouldClockOut = false;
+  p.clockOutOverdue = false;
+  p.status = 'clocked_out';
+  syncPersonStatus(p);
+  saveState();
+  pushAlert({ type: 'ok', msg: `${p.name} clocked out manually`, personId: p.id });
+  showToast(`${p.name} clocked out`);
+  render();
 }
 
 function removeBreak(personId, breakId) {
