@@ -3,21 +3,22 @@ const ZONE_MAX = { checklanes: 2, sco: 2, service: 1, driveup: 1 };
 const ZONE_LABELS = { checklanes: 'Checklanes', sco: 'SCO', service: 'Service Desk', driveup: 'Drive Up' };
 const BREAK_DUR = { break: 15, lunch: 30, lunch60: 60 };
 
+// ── IMPORTANT: Paste your Anthropic API key here ──────────────────
+// Get one free at https://console.anthropic.com
+const ANTHROPIC_API_KEY = 'YOUR_API_KEY_HERE';
+// ─────────────────────────────────────────────────────────────────
+
 let people = [];
 let alerts = [];
 let alertIdCounter = 0;
 let toastTimer = null;
 let activeTab = 'board';
 
-// Load from localStorage on start
 function loadState() {
   try {
     const saved = localStorage.getItem('bm_people');
     if (saved) people = JSON.parse(saved);
-    // Re-hydrate startMs from stored timestamps
-    people.forEach(p => {
-      if (p.startMs) p.startMs = Number(p.startMs);
-    });
+    people.forEach(p => { if (p.startMs) p.startMs = Number(p.startMs); });
   } catch(e) { people = []; }
 }
 
@@ -25,65 +26,91 @@ function saveState() {
   try { localStorage.setItem('bm_people', JSON.stringify(people)); } catch(e) {}
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────
 function initials(name) {
   return name.trim().split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
 }
-
 function isActive(p) {
   return p.status === 'break' || p.status === 'lunch' || p.status === 'overdue';
 }
-
 function getElapsedMin(p) {
   if (!p.startMs) return 0;
   return Math.floor((Date.now() - p.startMs) / 60000);
 }
-
-function getDur(p) {
-  return BREAK_DUR[p.type] || 15;
-}
-
-// Infer a default role/assignment when tasks/role are not provided.
-function inferRole(zone, tasks) {
-  if (tasks && tasks.length) return tasks;
-  switch (zone) {
-    case 'sco': return 'SCO / Self-Checkout';
-    case 'service': return 'Guest Service / Service Desk';
-    case 'driveup': return 'Drive Up / Fulfillment';
-    case 'checklanes':
-    default:
-      return 'Front End / Cashier';
-  }
-}
-
+function getDur(p) { return BREAK_DUR[p.type] || 15; }
 function fmtTime(ms) {
   if (!ms) return '—';
-  const d = new Date(ms);
-  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+function uid() { return Date.now() + Math.random().toString(36).slice(2, 7); }
+
+// ── Parse military / short time strings ─────────────────────────────
+function parseMilTime(raw) {
+  if (!raw) return null;
+  const str = String(raw).trim();
+  if (!str || str === '-' || str === '') return null;
+
+  // Has AM/PM already
+  const ampmMatch = str.match(/^(\d+):?(\d{2})?\s*(AM|PM)$/i);
+  if (ampmMatch) {
+    let h = parseInt(ampmMatch[1]);
+    const m = parseInt(ampmMatch[2] || '0');
+    const ap = ampmMatch[3].toUpperCase();
+    if (ap === 'PM' && h !== 12) h += 12;
+    if (ap === 'AM' && h === 12) h = 0;
+    const d = new Date(); d.setHours(h, m, 0, 0);
+    return d;
+  }
+
+  const num = str.replace(/[^0-9]/g, '');
+  if (!num) return null;
+
+  let h, m;
+  if (num.length <= 2) {
+    h = parseInt(num); m = 0;
+  } else if (num.length === 3) {
+    h = parseInt(num[0]); m = parseInt(num.slice(1));
+  } else {
+    h = parseInt(num.slice(0, 2)); m = parseInt(num.slice(2));
+  }
+  // Times < 7 are likely PM (2=2PM, 3=3PM, 530=5:30PM, 630=6:30PM, 715=7:15PM, 815=8:15PM)
+  if (h < 7) h += 12;
+  const d = new Date(); d.setHours(h, m, 0, 0);
+  return d;
 }
 
-function uid() {
-  return Date.now() + Math.random().toString(36).slice(2, 7);
+function fmtParsedTime(raw) {
+  const d = parseMilTime(raw);
+  if (!d) return null;
+  return { display: d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), ms: d.getTime() };
+}
+
+// ── Auto-assign zone from task string ───────────────────────────────
+function inferZone(taskStr) {
+  if (!taskStr) return null;
+  const t = taskStr.toUpperCase();
+  if (/SCO|SELF.?CHECK/.test(t)) return 'sco';
+  if (/DRIVE.?UP|OPU|FULFILLMENT|G.?ATTEND|GUEST.?ATTEND/.test(t)) return 'driveup';
+  if (/SERVICE.?DESK|GUEST.?SERVICE|\bGS\b|CASH.?OFFICE/.test(t)) return 'service';
+  if (/\bCL\b|CHECKLANE|FRONT.?END|\bPS\b/.test(t)) return 'checklanes';
+  return null;
 }
 
 // ── Clock ────────────────────────────────────────────────────────────
 function updateClock() {
   const now = new Date();
-  const timeEl = document.getElementById('topbar-time');
-  const dateEl = document.getElementById('topbar-date');
-  if (timeEl) timeEl.textContent = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  if (dateEl) dateEl.textContent = now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  const t = document.getElementById('topbar-time');
+  const d = document.getElementById('topbar-date');
+  if (t) t.textContent = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (d) d.textContent = now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
-// ── Tick: update overdue status ──────────────────────────────────────
+// ── Tick ─────────────────────────────────────────────────────────────
 function tick() {
   let changed = false;
   people.forEach(p => {
     if ((p.status === 'break' || p.status === 'lunch') && p.startMs) {
-      const elapsed = getElapsedMin(p);
-      if (elapsed >= getDur(p)) {
-        p.status = 'overdue';
-        changed = true;
+      if (getElapsedMin(p) >= getDur(p)) {
+        p.status = 'overdue'; changed = true;
         pushAlert({ type: 'urgent', msg: `${p.name} is overdue from ${p.type} — ${ZONE_LABELS[p.zone]}`, personId: p.id });
       }
     }
@@ -92,91 +119,52 @@ function tick() {
   render();
 }
 
-// ── Rendering ────────────────────────────────────────────────────────
+// ── Rendering ─────────────────────────────────────────────────────────
 function render() {
-  renderBoard();
-  renderStats();
-  renderCoverage();
-  renderAlerts();
-  renderAlertBanner();
-  updateClock();
+  renderBoard(); renderStats(); renderCoverage(); renderAlerts(); renderAlertBanner(); updateClock();
 }
 
 function renderBoard() {
   const zones = ['checklanes', 'sco', 'service', 'driveup'];
-  let anyPeople = people.length > 0;
-
-  const emptyEl = document.getElementById('board-empty');
-  if (emptyEl) emptyEl.classList.toggle('hidden', anyPeople);
+  document.getElementById('board-empty')?.classList.toggle('hidden', people.length > 0);
 
   zones.forEach(zone => {
     const list = document.getElementById('list-' + zone);
-    const group = document.getElementById('zone-' + zone + '-group');
     const pill = document.getElementById('pill-' + zone);
     if (!list) return;
 
-    const zonePeople = people.filter(p => p.zone === zone);
-    const onBreak = zonePeople.filter(p => isActive(p)).length;
+    const zp = people.filter(p => p.zone === zone);
+    const onBreak = zp.filter(p => isActive(p)).length;
     const max = ZONE_MAX[zone];
 
-    // Zone pill
     if (pill) {
-      if (onBreak > max) {
-        pill.textContent = `${onBreak}/${max} — over limit`;
-        pill.className = 'zone-pill pill-danger';
-      } else if (onBreak === max) {
-        pill.textContent = `${onBreak}/${max} — at limit`;
-        pill.className = 'zone-pill pill-warn';
-      } else {
-        pill.textContent = `${onBreak}/${max} on break`;
-        pill.className = 'zone-pill pill-ok';
-      }
+      if (onBreak > max) { pill.textContent = `${onBreak}/${max} — over limit`; pill.className = 'zone-pill pill-danger'; }
+      else if (onBreak === max) { pill.textContent = `${onBreak}/${max} — at limit`; pill.className = 'zone-pill pill-warn'; }
+      else { pill.textContent = `${onBreak}/${max} on break`; pill.className = 'zone-pill pill-ok'; }
     }
 
     list.innerHTML = '';
-    if (zonePeople.length === 0) {
+    if (zp.length === 0) {
       const em = document.createElement('div');
-      em.className = 'empty-small';
-      em.textContent = 'No team members in this zone.';
-      list.appendChild(em);
-      return;
+      em.className = 'empty-small'; em.textContent = 'No team members in this zone.';
+      list.appendChild(em); return;
     }
 
-    // Sort: overdue first, then on break, then upcoming by time
-    const sorted = [...zonePeople].sort((a, b) => {
-      const order = { overdue: 0, break: 1, lunch: 2, available: 3 };
-      return (order[a.status] ?? 3) - (order[b.status] ?? 3);
-    });
-
-    sorted.forEach(p => {
-      const card = document.createElement('div');
+    const order = { overdue: 0, break: 1, lunch: 2, available: 3 };
+    [...zp].sort((a, b) => (order[a.status] ?? 3) - (order[b.status] ?? 3)).forEach(p => {
       const elapsed = getElapsedMin(p);
       const dur = getDur(p);
       const remaining = dur - elapsed;
-
       let avClass = 'av-available', sbClass = 'sb-available', sbLabel = 'Available';
-      let timerText = p.scheduledTime ? `Break at ${p.scheduledTime}` : '';
+      let timerText = p.scheduledTime ? `Next break: ${p.scheduledTime}` : '';
 
-      if (p.status === 'break') {
-        avClass = 'av-break'; sbClass = 'sb-break'; sbLabel = '15-min break';
-        timerText = remaining > 0 ? `${remaining} min left` : 'time up';
-      } else if (p.status === 'lunch') {
-        avClass = 'av-lunch'; sbClass = 'sb-lunch'; sbLabel = `${dur}-min lunch`;
-        timerText = remaining > 0 ? `${remaining} min left` : 'time up';
-      } else if (p.status === 'overdue') {
-        avClass = 'av-overdue'; sbClass = 'sb-overdue'; sbLabel = 'Overdue!';
-        timerText = `+${Math.abs(remaining)} min overdue`;
-      }
+      if (p.status === 'break') { avClass = 'av-break'; sbClass = 'sb-break'; sbLabel = '15-min break'; timerText = remaining > 0 ? `${remaining} min left` : 'time up'; }
+      else if (p.status === 'lunch') { avClass = 'av-lunch'; sbClass = 'sb-lunch'; sbLabel = `${dur}-min lunch`; timerText = remaining > 0 ? `${remaining} min left` : 'time up'; }
+      else if (p.status === 'overdue') { avClass = 'av-overdue'; sbClass = 'sb-overdue'; sbLabel = 'Overdue!'; timerText = `+${Math.abs(remaining)} min overdue`; }
 
+      const card = document.createElement('div');
       card.className = 'person-card' + (p.status === 'overdue' ? ' overdue' : '');
-      card.innerHTML = `
-        <div class="avatar ${avClass}">${initials(p.name)}</div>
-        <div class="person-info">
-          <div class="person-name">${p.name}</div>
-          <div class="person-timer${p.status === 'overdue' ? ' overdue' : ''}">${timerText}</div>
-        </div>
-        <span class="status-badge ${sbClass}">${sbLabel}</span>
-      `;
+      card.innerHTML = `<div class="avatar ${avClass}">${initials(p.name)}</div><div class="person-info"><div class="person-name">${p.name}</div><div class="person-timer${p.status === 'overdue' ? ' overdue' : ''}">${timerText}</div></div><span class="status-badge ${sbClass}">${sbLabel}</span>`;
       card.onclick = () => openModal(p.id);
       list.appendChild(card);
     });
@@ -186,16 +174,12 @@ function renderBoard() {
 function renderStats() {
   let avail = 0, onBreak = 0, overdue = 0, upcoming = 0;
   const now = Date.now();
-  const soon = 20 * 60000;
   people.forEach(p => {
     if (p.status === 'overdue') overdue++;
     else if (p.status === 'break' || p.status === 'lunch') onBreak++;
-    else if (p.status === 'available') {
-      avail++;
-      if (p.scheduledMs && (p.scheduledMs - now) < soon && (p.scheduledMs - now) > 0) upcoming++;
-    }
+    else { avail++; if (p.scheduledMs && (p.scheduledMs - now) < 20*60000 && (p.scheduledMs - now) > 0) upcoming++; }
   });
-  const s = n => document.getElementById(n);
+  const s = id => document.getElementById(id);
   if (s('stat-available')) s('stat-available').textContent = avail;
   if (s('stat-onbreak'))   s('stat-onbreak').textContent = onBreak;
   if (s('stat-overdue'))   s('stat-overdue').textContent = overdue;
@@ -214,10 +198,9 @@ function renderCoverage() {
   const bar = document.getElementById('cov-bar');
   const pctLbl = document.getElementById('cov-pct-label');
   if (badge) { badge.textContent = `${active} / ${people.length}`; badge.className = 'cov-badge ' + cls; }
-  if (bar)   { bar.style.width = Math.min(pct, 100) + '%'; bar.className = 'bar-fill ' + bfill; }
+  if (bar) { bar.style.width = Math.min(pct, 100) + '%'; bar.className = 'bar-fill ' + bfill; }
   if (pctLbl) pctLbl.textContent = `${pct}% — ${label}`;
 
-  // Zone tiles
   Object.keys(ZONE_MAX).forEach(zone => {
     const cnt = people.filter(p => p.zone === zone && isActive(p)).length;
     const tile = document.getElementById('ztile-' + zone);
@@ -226,210 +209,109 @@ function renderCoverage() {
     if (tile) tile.className = 'zone-tile' + (cnt > ZONE_MAX[zone] ? ' over' : '');
   });
 
-  // Upcoming list
   const now = Date.now();
-  const soon = 20 * 60000;
-  const upcoming = people.filter(p => p.status === 'available' && p.scheduledMs && (p.scheduledMs - now) < soon && (p.scheduledMs - now) > 0)
+  const upcoming = people.filter(p => p.status === 'available' && p.scheduledMs && (p.scheduledMs - now) < 20*60000 && (p.scheduledMs - now) > 0)
     .sort((a, b) => a.scheduledMs - b.scheduledMs);
-
   const upEl = document.getElementById('upcoming-list');
   if (upEl) {
-    upEl.innerHTML = '';
-    if (upcoming.length === 0) {
-      upEl.innerHTML = '<div class="empty-small">No upcoming breaks in the next 20 minutes.</div>';
-    } else {
-      upcoming.forEach(p => {
-        const card = document.createElement('div');
-        card.className = 'upcoming-card';
-        const minsUntil = Math.round((p.scheduledMs - now) / 60000);
-        card.innerHTML = `
-          <div class="avatar av-break">${initials(p.name)}</div>
-          <div class="person-info">
-            <div class="person-name">${p.name}</div>
-            <div class="person-detail">${ZONE_LABELS[p.zone]} — ${p.type === 'break' ? '15-min break' : 'lunch'}</div>
-          </div>
-          <span class="status-badge sb-upcoming">in ${minsUntil}m</span>
-        `;
-        upEl.appendChild(card);
-      });
-    }
+    upEl.innerHTML = upcoming.length === 0
+      ? '<div class="empty-small">No upcoming breaks in the next 20 minutes.</div>'
+      : upcoming.map(p => {
+          const minsUntil = Math.round((p.scheduledMs - now) / 60000);
+          return `<div class="upcoming-card"><div class="avatar av-break">${initials(p.name)}</div><div class="person-info"><div class="person-name">${p.name}</div><div class="person-detail">${ZONE_LABELS[p.zone]} — ${p.type === 'break' ? '15-min break' : 'lunch'}</div></div><span class="status-badge sb-upcoming">in ${minsUntil}m</span></div>`;
+        }).join('');
   }
 }
 
 function renderAlerts() {
   const el = document.getElementById('alerts-inner');
-  const emptyEl = document.getElementById('alerts-empty');
   if (!el) return;
+  alerts = alerts.filter(a => Date.now() - a.ts < 60*60000);
 
-  // Remove stale auto-alerts older than 60 min
-  alerts = alerts.filter(a => Date.now() - a.ts < 60 * 60000);
-
-  // Build current alerts from state
   const liveAlerts = [];
-
-  // Overdue
   people.filter(p => p.status === 'overdue').forEach(p => {
-    const elapsed = getElapsedMin(p);
-    const dur = getDur(p);
-    liveAlerts.push({
-      id: 'overdue-' + p.id,
-      type: 'urgent',
-      msg: `${p.name} is ${elapsed - dur} min overdue from ${p.type} — ${ZONE_LABELS[p.zone]}`,
-      actions: [
-        { label: 'Mark returned', fn: `markReturned('${p.id}')` },
-      ]
-    });
+    const over = getElapsedMin(p) - getDur(p);
+    liveAlerts.push({ id: 'overdue-' + p.id, type: 'urgent',
+      msg: `${p.name} is ${over} min overdue from ${p.type} — ${ZONE_LABELS[p.zone]}`,
+      actions: [{ label: 'Mark returned', fn: `markReturned('${p.id}')` }] });
   });
-
-  // Zone over limit
   Object.keys(ZONE_MAX).forEach(zone => {
     const cnt = people.filter(p => p.zone === zone && isActive(p)).length;
-    if (cnt > ZONE_MAX[zone]) {
-      liveAlerts.push({
-        id: 'zone-' + zone,
-        type: 'urgent',
-        msg: `${cnt} people on break in ${ZONE_LABELS[zone]} — max is ${ZONE_MAX[zone]}`,
-        actions: [{ label: 'View coverage', fn: "switchTab('coverage')" }]
-      });
-    }
+    if (cnt > ZONE_MAX[zone]) liveAlerts.push({ id: 'zone-' + zone, type: 'urgent',
+      msg: `${cnt} people on break in ${ZONE_LABELS[zone]} — max is ${ZONE_MAX[zone]}`,
+      actions: [{ label: 'View coverage', fn: "switchTab('coverage')" }] });
   });
-
-  // Upcoming in 15 min
   const now = Date.now();
-  people.filter(p => p.status === 'available' && p.scheduledMs && (p.scheduledMs - now) < 15 * 60000 && (p.scheduledMs - now) > 0)
+  people.filter(p => p.status === 'available' && p.scheduledMs && (p.scheduledMs - now) < 15*60000 && (p.scheduledMs - now) > 0)
     .forEach(p => {
-      const minsUntil = Math.round((p.scheduledMs - now) / 60000);
-      liveAlerts.push({
-        id: 'upcoming-' + p.id,
-        type: 'info',
-        msg: `${p.name}'s ${p.type === 'break' ? 'break' : 'lunch'} is due in ${minsUntil} min — ${ZONE_LABELS[p.zone]} (${p.scheduledTime})`,
-      });
+      const m = Math.round((p.scheduledMs - now) / 60000);
+      liveAlerts.push({ id: 'upcoming-' + p.id, type: 'info',
+        msg: `${p.name}'s ${p.type === 'break' ? 'break' : 'lunch'} is due in ${m} min — ${ZONE_LABELS[p.zone]} (${p.scheduledTime})` });
     });
+  liveAlerts.push(...alerts.filter(a => a.type === 'ok'));
 
-  // Completed (from stored alerts)
-  const completed = alerts.filter(a => a.type === 'ok');
-  liveAlerts.push(...completed.map(a => ({ ...a, type: 'ok' })));
-
-  // Badge
   const urgentCount = liveAlerts.filter(a => a.type === 'urgent').length;
   const badge = document.getElementById('alert-count');
-  if (badge) {
-    badge.textContent = urgentCount;
-    badge.classList.toggle('hidden', urgentCount === 0);
-  }
+  if (badge) { badge.textContent = urgentCount; badge.classList.toggle('hidden', urgentCount === 0); }
 
-  // Render
-  el.innerHTML = '';
-  if (liveAlerts.length === 0) {
-    el.innerHTML = '<div class="empty-small">No active alerts. All good!</div>';
-    return;
-  }
-
-  liveAlerts.forEach(a => {
-    const item = document.createElement('div');
-    item.className = `alert-item ${a.type}`;
+  if (liveAlerts.length === 0) { el.innerHTML = '<div class="empty-small">No active alerts. All good!</div>'; return; }
+  el.innerHTML = liveAlerts.map(a => {
     const ts = a.ts ? fmtTime(a.ts) : '';
-    const actionsHtml = (a.actions || []).map(act =>
-      `<button class="btn-tiny" onclick="${act.fn}">${act.label}</button>`
-    ).join('');
-    item.innerHTML = `
-      <div class="alert-dot2 ad-${a.type}"></div>
-      <div class="alert-body">
-        <div class="alert-msg">${a.msg}</div>
-        ${ts ? `<div class="alert-ts">${ts}</div>` : ''}
-        ${actionsHtml ? `<div class="alert-actions">${actionsHtml}</div>` : ''}
-      </div>
-    `;
-    el.appendChild(item);
-  });
+    const acts = (a.actions || []).map(act => `<button class="btn-tiny" onclick="${act.fn}">${act.label}</button>`).join('');
+    return `<div class="alert-item ${a.type}"><div class="alert-dot2 ad-${a.type}"></div><div class="alert-body"><div class="alert-msg">${a.msg}</div>${ts ? `<div class="alert-ts">${ts}</div>` : ''}${acts ? `<div class="alert-actions">${acts}</div>` : ''}</div></div>`;
+  }).join('');
 }
 
 function renderAlertBanner() {
   const overdue = people.filter(p => p.status === 'overdue');
-  const zoneOver = Object.keys(ZONE_MAX).some(zone =>
-    people.filter(p => p.zone === zone && isActive(p)).length > ZONE_MAX[zone]
-  );
-
+  const zoneOver = Object.keys(ZONE_MAX).some(zone => people.filter(p => p.zone === zone && isActive(p)).length > ZONE_MAX[zone]);
   const banner = document.getElementById('alert-banner');
   const text = document.getElementById('alert-text');
   if (!banner) return;
-
-  if (overdue.length > 0) {
-    banner.classList.remove('hidden');
-    text.textContent = `${overdue[0].name} is overdue from ${overdue[0].type} — tap for details`;
-  } else if (zoneOver) {
-    banner.classList.remove('hidden');
-    text.textContent = 'Coverage alert: too many on break in a zone';
-  } else {
-    banner.classList.add('hidden');
-  }
+  if (overdue.length > 0) { banner.classList.remove('hidden'); text.textContent = `${overdue[0].name} is overdue from ${overdue[0].type} — tap for details`; }
+  else if (zoneOver) { banner.classList.remove('hidden'); text.textContent = 'Coverage alert: too many on break in a zone'; }
+  else { banner.classList.add('hidden'); }
 }
 
-// ── Tab switching ────────────────────────────────────────────────────
+// ── Tabs ──────────────────────────────────────────────────────────────
 function switchTab(tab) {
   activeTab = tab;
-  ['board', 'coverage', 'upload', 'alerts'].forEach(t => {
+  ['board','coverage','upload','alerts'].forEach(t => {
     document.getElementById('view-' + t)?.classList.toggle('active', t === tab);
     document.getElementById('tab-' + t)?.classList.toggle('active', t === tab);
   });
   render();
 }
 
-// ── Person modal ─────────────────────────────────────────────────────
+// ── Modal ─────────────────────────────────────────────────────────────
 function openModal(personId) {
   const p = people.find(x => x.id === personId);
   if (!p) return;
-
   const overlay = document.getElementById('modal-overlay');
   const av = document.getElementById('modal-avatar');
   const nm = document.getElementById('modal-name');
   const sub = document.getElementById('modal-sub');
   const body = document.getElementById('modal-body');
-
   let avClass = 'av-available';
   if (p.status === 'break') avClass = 'av-break';
   if (p.status === 'lunch') avClass = 'av-lunch';
   if (p.status === 'overdue') avClass = 'av-overdue';
-
   av.className = 'modal-avatar ' + avClass;
   av.textContent = initials(p.name);
   nm.textContent = p.name;
   sub.textContent = ZONE_LABELS[p.zone] + ' · ' + (p.type === 'break' ? '15-min break' : p.type === 'lunch' ? '30-min lunch' : '60-min lunch');
-
-  // Info rows
   const elapsed = getElapsedMin(p);
   const dur = getDur(p);
   const remaining = dur - elapsed;
-
-  let actionsHtml = '';
-  if (p.status === 'available') {
-    actionsHtml = `
-      <div class="modal-action-row">
-        <button class="modal-btn start-break" onclick="startBreak('${p.id}', 'break'); closeModal()">Start 15-min break</button>
-        <button class="modal-btn start-lunch" onclick="startBreak('${p.id}', 'lunch'); closeModal()">Start 30-min lunch</button>
-      </div>
-      <div class="modal-action-row">
-        <button class="modal-btn start-lunch" onclick="startBreak('${p.id}', 'lunch60'); closeModal()">Start 60-min lunch</button>
-        <button class="modal-btn remove" onclick="removePerson('${p.id}'); closeModal()">Remove</button>
-      </div>
-    `;
-  } else {
-    actionsHtml = `
-      <div class="modal-action-row">
-        <button class="modal-btn mark-back" onclick="markReturned('${p.id}'); closeModal()">Mark returned</button>
-        <button class="modal-btn remove" onclick="removePerson('${p.id}'); closeModal()">Remove</button>
-      </div>
-    `;
-  }
-
-  body.innerHTML = `
-    ${actionsHtml}
-    <div class="modal-info-row"><span class="modal-info-label">Status</span><span class="modal-info-value">${p.status.charAt(0).toUpperCase() + p.status.slice(1)}</span></div>
-    <div class="modal-info-row"><span class="modal-info-label">Scheduled</span><span class="modal-info-value">${p.scheduledTime || '—'}</span></div>
-    <div class="modal-info-row"><span class="modal-info-label">Break started</span><span class="modal-info-value">${p.startMs ? fmtTime(p.startMs) : '—'}</span></div>
-    <div class="modal-info-row"><span class="modal-info-label">Time remaining</span><span class="modal-info-value">${isActive(p) ? (remaining > 0 ? remaining + ' min' : 'Overdue by ' + Math.abs(remaining) + ' min') : '—'}</span></div>
-  `;
-
+  let actionsHtml = p.status === 'available'
+    ? `<div class="modal-action-row"><button class="modal-btn start-break" onclick="startBreak('${p.id}','break');closeModal()">Start 15-min break</button><button class="modal-btn start-lunch" onclick="startBreak('${p.id}','lunch');closeModal()">Start 30-min lunch</button></div><div class="modal-action-row"><button class="modal-btn start-lunch" onclick="startBreak('${p.id}','lunch60');closeModal()">Start 60-min lunch</button><button class="modal-btn remove" onclick="removePerson('${p.id}');closeModal()">Remove</button></div>`
+    : `<div class="modal-action-row"><button class="modal-btn mark-back" onclick="markReturned('${p.id}');closeModal()">Mark returned</button><button class="modal-btn remove" onclick="removePerson('${p.id}');closeModal()">Remove</button></div>`;
+  body.innerHTML = `${actionsHtml}
+    <div class="modal-info-row"><span class="modal-info-label">Status</span><span class="modal-info-value">${p.status.charAt(0).toUpperCase()+p.status.slice(1)}</span></div>
+    <div class="modal-info-row"><span class="modal-info-label">Zone</span><span class="modal-info-value">${ZONE_LABELS[p.zone]}</span></div>
+    <div class="modal-info-row"><span class="modal-info-label">Next break</span><span class="modal-info-value">${p.scheduledTime||'—'}</span></div>
+    <div class="modal-info-row"><span class="modal-info-label">Break started</span><span class="modal-info-value">${p.startMs?fmtTime(p.startMs):'—'}</span></div>
+    <div class="modal-info-row"><span class="modal-info-label">Time remaining</span><span class="modal-info-value">${isActive(p)?(remaining>0?remaining+' min':'Overdue by '+Math.abs(remaining)+' min'):'—'}</span></div>`;
   overlay.classList.remove('hidden');
 }
 
@@ -437,34 +319,26 @@ function closeModal() {
   document.getElementById('modal-overlay')?.classList.add('hidden');
 }
 
-// ── Actions ──────────────────────────────────────────────────────────
+// ── Actions ───────────────────────────────────────────────────────────
 function startBreak(personId, type) {
   const p = people.find(x => x.id === personId);
   if (!p) return;
   p.status = type === 'lunch60' ? 'lunch' : type;
-  p.type = type;
-  p.startMs = Date.now();
-  saveState();
-  showToast(`${p.name} — ${type === 'break' ? '15-min break' : type === 'lunch' ? '30-min lunch' : '60-min lunch'} started`);
-  render();
+  p.type = type; p.startMs = Date.now();
+  saveState(); showToast(`${p.name} — ${type==='break'?'15-min break':type==='lunch'?'30-min lunch':'60-min lunch'} started`); render();
 }
 
 function markReturned(personId) {
   const p = people.find(x => x.id === personId);
   if (!p) return;
-  pushAlert({ type: 'ok', msg: `${p.name} returned from ${p.type} on time` });
-  p.status = 'available';
-  p.startMs = null;
-  saveState();
-  showToast(`${p.name} marked as returned`);
-  render();
+  pushAlert({ type: 'ok', msg: `${p.name} returned from ${p.type}` });
+  p.status = 'available'; p.startMs = null;
+  saveState(); showToast(`${p.name} marked as returned`); render();
 }
 
 function removePerson(personId) {
   people = people.filter(x => x.id !== personId);
-  saveState();
-  showToast('Team member removed');
-  render();
+  saveState(); showToast('Team member removed'); render();
 }
 
 function addManual() {
@@ -473,16 +347,13 @@ function addManual() {
   const timeVal = document.getElementById('manual-time')?.value;
   const type = document.getElementById('manual-type')?.value || 'break';
   const zone = document.getElementById('manual-zone')?.value || 'checklanes';
-
-  let scheduledTime = '';
-  let scheduledMs = null;
+  let scheduledTime = '', scheduledMs = null;
   if (timeVal) {
     const [h, m] = timeVal.split(':').map(Number);
     const d = new Date(); d.setHours(h, m, 0, 0);
     scheduledMs = d.getTime();
     scheduledTime = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   }
-
   people.push({ id: uid(), name, zone, type, status: 'available', startMs: null, scheduledTime, scheduledMs });
   saveState();
   if (document.getElementById('manual-name')) document.getElementById('manual-name').value = '';
@@ -492,74 +363,54 @@ function addManual() {
 
 function confirmReset() {
   if (confirm('Clear all team members and start a fresh shift?')) {
-    people = [];
-    alerts = [];
-    saveState();
-    showToast('Shift reset — ready for a new day');
-    render();
+    people = []; alerts = []; saveState(); showToast('Shift reset — ready for a new day'); render();
   }
 }
 
-// ── AI Schedule Scanner ───────────────────────────────────────────────
+// ── File upload handler (image + PDF) ────────────────────────────────
 async function handleFileUpload(input) {
   const file = input.files[0];
   if (!file) return;
 
-  // Show loading
+  if (!ANTHROPIC_API_KEY || ANTHROPIC_API_KEY === 'YOUR_API_KEY_HERE') {
+    showToast('Add your API key in app.js first — get one free at console.anthropic.com');
+    input.value = '';
+    return;
+  }
+
   document.getElementById('upload-box').classList.add('hidden');
   document.getElementById('scan-loading').classList.remove('hidden');
+  const scanText = document.getElementById('scan-text');
+  if (scanText) scanText.textContent = file.type === 'application/pdf' ? 'Reading your PDF schedule...' : 'Reading your schedule photo...';
 
   try {
-    // Convert image to base64
-    const base64 = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result.split(',')[1]);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
+    const base64 = await fileToBase64(file);
+    const isPDF = file.type === 'application/pdf';
+    const mediaType = isPDF ? 'application/pdf' : (file.type && file.type.startsWith('image/') ? file.type : 'image/jpeg');
 
-    const mediaType = file.type || 'image/jpeg';
+    const contentBlock = isPDF
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } }
+      : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } };
 
-    // Call Claude API with vision
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: mediaType, data: base64 }
-            },
-            {
-              type: 'text',
-              text: `You are reading a Target store break schedule. Extract every team member's break or lunch assignment.
-
-Return ONLY a JSON array, no other text, no markdown. Each item:
-{
-  "name": "First Last",
-  "time": "2:30 PM",
-  "type": "break" | "lunch" | "lunch60",
-  "zone": "checklanes" | "sco" | "service" | "driveup"
-}
-
-Rules:
-- "break" = 15-minute break
-- "lunch" = 30-minute lunch  
-- "lunch60" = 60-minute lunch
-- Zones: map "front end" or "lanes" to "checklanes", "self checkout" to "sco", "guest service" or "service desk" to "service", "OPU" or "drive up" or "fulfillment" to "driveup"
-- If zone is unclear, default to "checklanes"
-- If time is unclear, omit the time field
-
-Return only the JSON array.`
-            }
-          ]
-        }]
+        max_tokens: 2000,
+        messages: [{ role: 'user', content: [contentBlock, { type: 'text', text: buildScanPrompt() }] }]
       })
     });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error?.message || `API error ${response.status}. Check your API key is correct.`);
+    }
 
     const data = await response.json();
     const text = data.content?.map(c => c.text || '').join('') || '';
@@ -569,11 +420,12 @@ Return only the JSON array.`
       const clean = text.replace(/```json|```/g, '').trim();
       parsed = JSON.parse(clean);
     } catch(e) {
-      throw new Error('Could not read schedule from image. Try a clearer photo.');
+      console.error('Raw AI response:', text);
+      throw new Error('Could not parse the schedule. Try a clearer, straight-on photo with good lighting.');
     }
 
     if (!Array.isArray(parsed) || parsed.length === 0) {
-      throw new Error('No schedule data found in image. Try a clearer photo.');
+      throw new Error('No team members found in the schedule. Make sure the table is clearly visible.');
     }
 
     showParsedResults(parsed);
@@ -581,57 +433,142 @@ Return only the JSON array.`
   } catch (err) {
     document.getElementById('scan-loading').classList.add('hidden');
     document.getElementById('upload-box').classList.remove('hidden');
-    showToast(err.message || 'Error reading image. Please try again.');
+    showToast(err.message || 'Error reading file. Please try again.');
     console.error(err);
   }
 
-  // Reset file input
   input.value = '';
 }
 
-function showParsedResults(parsed) {
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function buildScanPrompt() {
+  return `You are reading a Target store "Additional Assignment Sheet" — a break and lunch schedule.
+
+The table has columns: TM Name, Shift, 1st Break, Lunch, 2nd Break, Task(s).
+Times in the break columns are written in SHORT military format:
+  9 = 9:00 AM, 10 = 10:00 AM, 11 = 11:00 AM, 12 = 12:00 PM
+  1 = 1:00 PM, 2 = 2:00 PM, 3 = 3:00 PM, 4 = 4:00 PM, 5 = 5:00 PM, 6 = 6:00 PM
+  1130 = 11:30 AM, 1245 = 12:45 PM, 245 = 2:45 PM, 315 = 3:15 PM
+  530 = 5:30 PM, 545 = 5:45 PM, 615 = 6:15 PM, 630 = 6:30 PM
+  715 = 7:15 PM, 745 = 7:45 PM, 815 = 8:15 PM, 830 = 8:30 PM
+  1015 = 10:15 PM
+
+For each team member row, output ONE entry per break slot that has a time filled in.
+If a person has both a 1st break AND a lunch, output TWO separate entries for that person.
+If a person has a 1st break, lunch, AND 2nd break, output THREE entries.
+
+Return ONLY a JSON array. No markdown, no explanation. Each item:
+{
+  "name": "name exactly as written",
+  "time": "the raw time value exactly as written in the cell e.g. 9, 1130, 245, 815",
+  "type": "break" or "lunch",
+  "zone": "checklanes" or "sco" or "service" or "driveup" or "",
+  "task": "contents of the Task(s) column, or empty string"
+}
+
+Zone rules from Task(s) column:
+- CL, CL/PS, CL/SCO SUPPORT, CL/CASH OFFICE → "checklanes"
+- SCO, SCO 1, SCO 2, SCO 2/CL SUPPORT → "sco"
+- SERVICE DESK, GUEST SERVICE → "service"
+- DRIVE UP, OPU, G ATTENDENT, GUEST ATTENDANT → "driveup"
+- If task cell is blank or unclear → set zone to ""
+
+1st Break and 2nd Break entries use type "break".
+Lunch entries use type "lunch".
+Skip any row with no name. Return only the JSON array.`;
+}
+
+// ── Parse results + auto-zone warning ────────────────────────────────
+function showParsedResults(rawRows) {
   document.getElementById('scan-loading').classList.add('hidden');
+
+  const expanded = [];
+  const autoAssignedMap = new Map();
+
+  rawRows.forEach(row => {
+    if (!row.name || !row.name.trim()) return;
+
+    let zone = row.zone || '';
+    let wasAutoAssigned = false;
+
+    if (!zone) {
+      const inferred = inferZone(row.task || '');
+      zone = inferred || 'checklanes';
+      wasAutoAssigned = true;
+      if (!autoAssignedMap.has(row.name)) {
+        autoAssignedMap.set(row.name, { name: row.name, assignedZone: ZONE_LABELS[zone], task: row.task || '(no task listed)' });
+      }
+    }
+
+    const parsed = fmtParsedTime(row.time);
+
+    expanded.push({
+      name: row.name.trim(),
+      rawTime: row.time,
+      displayTime: parsed ? parsed.display : (row.time ? String(row.time) : ''),
+      scheduledMs: parsed ? parsed.ms : null,
+      type: row.type || 'break',
+      zone,
+      wasAutoAssigned,
+      task: row.task || ''
+    });
+  });
+
+  window._parsedSchedule = expanded;
 
   const list = document.getElementById('parsed-list');
   const countEl = document.getElementById('parsed-count');
   list.innerHTML = '';
+  if (countEl) countEl.textContent = `${expanded.length} break entries found from ${new Set(expanded.map(r=>r.name)).size} team members`;
 
-  if (countEl) countEl.textContent = `${parsed.length} people found`;
+  // Remove any existing warning
+  document.getElementById('auto-assign-warning')?.remove();
 
-  // Store for import
-  // Attach inferred roles for rows that lack `tasks` or `role`.
-  parsed.forEach(row => {
-    // Normalize zone to default if missing
-    row.zone = row.zone || 'checklanes';
-    if (!row.tasks && !row.role) {
-      row.assignedRole = inferRole(row.zone, row.tasks || '');
-    } else {
-      row.assignedRole = row.role || (row.tasks ? row.tasks : '');
-    }
-  });
-  window._parsedSchedule = parsed;
-
-  // Build assignment warning list
-  const assignListEl = document.getElementById('parsed-assign-list');
-  const assignWarningEl = document.getElementById('parsed-assign-warning');
-  const autoAssigned = parsed.filter(r => r.assignedRole && (!r.role && !r.tasks));
-  if (assignListEl) {
-    if (autoAssigned.length === 0) {
-      assignWarningEl?.classList.add('hidden');
-    } else {
-      assignWarningEl?.classList.remove('hidden');
-      assignListEl.innerHTML = autoAssigned.map(r => `<div style="padding:6px 0; border-bottom:1px solid var(--gray-100)"><strong>${r.name}</strong> → ${r.assignedRole}</div>`).join('');
-    }
+  const autoAssigned = [...autoAssignedMap.values()];
+  if (autoAssigned.length > 0) {
+    const warn = document.createElement('div');
+    warn.id = 'auto-assign-warning';
+    warn.className = 'assign-warning';
+    warn.innerHTML = `
+      <div class="warn-header">
+        <div class="warn-icon">!</div>
+        <div class="warn-header-text">
+          <div class="warn-title">Zone auto-assigned for ${autoAssigned.length} team member${autoAssigned.length > 1 ? 's' : ''}</div>
+          <div class="warn-sub">These team members had no task listed — zone was guessed based on name or defaulted to Checklanes. Please review before importing.</div>
+        </div>
+      </div>
+      <div class="warn-list">
+        ${autoAssigned.map(a => `
+          <div class="warn-row">
+            <span class="warn-name">${a.name}</span>
+            <span class="warn-arrow">→</span>
+            <span class="warn-zone">${a.assignedZone}</span>
+            <span class="warn-task">${a.task}</span>
+          </div>`).join('')}
+      </div>
+    `;
+    // Insert before parsed-list's parent content
+    list.parentNode.insertBefore(warn, document.getElementById('parsed-section').querySelector('.parsed-header').nextSibling);
   }
 
-  parsed.forEach(row => {
+  expanded.forEach(row => {
     const div = document.createElement('div');
-    div.className = 'parsed-row';
+    div.className = 'parsed-row' + (row.wasAutoAssigned ? ' auto-assigned' : '');
     const typeLabel = row.type === 'break' ? '15-min break' : row.type === 'lunch60' ? '60-min lunch' : '30-min lunch';
     const typeCls = row.type === 'break' ? 'pt-break' : 'pt-lunch';
     div.innerHTML = `
-      <span class="parsed-name">${row.name}</span>
-      <span class="parsed-meta">${ZONE_LABELS[row.zone] || row.zone}${row.time ? ' · ' + row.time : ''}</span>
+      <div class="parsed-row-main">
+        <span class="parsed-name">${row.name}</span>
+        <span class="parsed-meta">${ZONE_LABELS[row.zone]}${row.displayTime ? ' · ' + row.displayTime : ''}${row.wasAutoAssigned ? ' <span class="auto-tag">auto</span>' : ''}</span>
+      </div>
       <span class="parsed-type ${typeCls}">${typeLabel}</span>
     `;
     list.appendChild(div);
@@ -643,59 +580,29 @@ function showParsedResults(parsed) {
 function importSchedule() {
   const parsed = window._parsedSchedule || [];
   parsed.forEach(row => {
-    let scheduledMs = null;
-    let scheduledTime = row.time || '';
-    if (row.time) {
-      // Parse time like "2:30 PM"
-      const match = row.time.match(/(\d+):(\d+)\s*(AM|PM)?/i);
-      if (match) {
-        let h = parseInt(match[1]);
-        const m = parseInt(match[2]);
-        const ampm = match[3]?.toUpperCase();
-        if (ampm === 'PM' && h !== 12) h += 12;
-        if (ampm === 'AM' && h === 12) h = 0;
-        const d = new Date(); d.setHours(h, m, 0, 0);
-        scheduledMs = d.getTime();
-        scheduledTime = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-      }
-    }
-    const zone = row.zone || 'checklanes';
-    // Use assignedRole (inferred) if present, otherwise any provided role/tasks
-    const role = row.assignedRole || row.role || (row.tasks ? row.tasks : '');
-    people.push({
-      id: uid(),
-      name: row.name,
-      zone,
-      type: row.type || 'break',
-      role: role,
-      status: 'available',
-      startMs: null,
-      scheduledTime,
-      scheduledMs
-    });
+    people.push({ id: uid(), name: row.name, zone: row.zone, type: row.type, status: 'available', startMs: null, scheduledTime: row.displayTime, scheduledMs: row.scheduledMs });
   });
-
   saveState();
   document.getElementById('parsed-section').classList.add('hidden');
+  document.getElementById('auto-assign-warning')?.remove();
   document.getElementById('import-success').classList.remove('hidden');
-  showToast(`${parsed.length} team members imported`);
+  const names = new Set(parsed.map(r => r.name)).size;
+  showToast(`${names} team members imported (${parsed.length} break entries)`);
 }
 
 function resetUpload() {
   document.getElementById('parsed-section').classList.add('hidden');
   document.getElementById('import-success').classList.add('hidden');
   document.getElementById('upload-box').classList.remove('hidden');
+  document.getElementById('auto-assign-warning')?.remove();
   window._parsedSchedule = [];
 }
 
-// ── Alert helpers ────────────────────────────────────────────────────
+// ── Alerts ────────────────────────────────────────────────────────────
 function pushAlert(alert) {
   alert.id = alert.id || ('alert-' + alertIdCounter++);
   alert.ts = Date.now();
-  // Dedupe
-  if (!alerts.find(a => a.id === alert.id && a.type === alert.type)) {
-    alerts.unshift(alert);
-  }
+  if (!alerts.find(a => a.id === alert.id && a.type === alert.type)) alerts.unshift(alert);
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────
@@ -705,44 +612,27 @@ function showToast(msg) {
   toast.textContent = msg;
   toast.classList.remove('hidden');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.add('hidden'), 2800);
+  toastTimer = setTimeout(() => toast.classList.add('hidden'), 3500);
 }
 
-// ── PWA Service Worker ────────────────────────────────────────────────
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(() => {});
-}
-
-// ── Push notifications (browser) ──────────────────────────────────────
+// ── PWA + Notifications ───────────────────────────────────────────────
+if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js').catch(() => {}); }
 function requestNotificationPermission() {
-  if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission();
-  }
+  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
 }
-
 function sendPushNotification(title, body) {
-  if ('Notification' in window && Notification.permission === 'granted') {
-    new Notification(title, { body, icon: '/icons/icon-192.png', badge: '/icons/icon-192.png' });
-  }
+  if ('Notification' in window && Notification.permission === 'granted')
+    new Notification(title, { body, icon: '/icons/icon-192.png' });
 }
-
-// Watch for overdue and send push
 let notifiedOverdue = new Set();
 function checkPushNotifications() {
   people.filter(p => p.status === 'overdue').forEach(p => {
-    if (!notifiedOverdue.has(p.id)) {
-      notifiedOverdue.add(p.id);
-      sendPushNotification('Break overdue', `${p.name} needs to return from ${p.type} — ${ZONE_LABELS[p.zone]}`);
-    }
+    if (!notifiedOverdue.has(p.id)) { notifiedOverdue.add(p.id); sendPushNotification('Break overdue!', `${p.name} needs to return — ${ZONE_LABELS[p.zone]}`); }
   });
-  // Clear from set if they return
-  notifiedOverdue.forEach(id => {
-    const p = people.find(x => x.id === id);
-    if (!p || !isActive(p)) notifiedOverdue.delete(id);
-  });
+  notifiedOverdue.forEach(id => { const p = people.find(x => x.id === id); if (!p || !isActive(p)) notifiedOverdue.delete(id); });
 }
 
-// ── Init ─────────────────────────────────────────────────────────────
+// ── Init ──────────────────────────────────────────────────────────────
 loadState();
 requestNotificationPermission();
 render();

@@ -168,21 +168,21 @@
     <section class="view" id="view-upload">
       <div class="upload-section">
         <div class="upload-box" id="upload-box" onclick="document.getElementById('file-input').click()">
-          <input type="file" id="file-input" accept="image/*" style="display:none" onchange="handleFileUpload(this)">
+          <input type="file" id="file-input" accept="image/*,application/pdf" style="display:none" onchange="handleFileUpload(this)">
           <div class="upload-icon-wrap">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
               <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
               <circle cx="12" cy="13" r="4"/>
             </svg>
           </div>
-          <div class="upload-title">Scan your paper schedule</div>
-          <div class="upload-sub">Take a photo or upload an image of your break sheet — Claude reads the names, times, and zones automatically</div>
+          <div class="upload-title">Scan your paper schedule or upload PDF</div>
+          <div class="upload-sub">Take a photo of your break sheet, or upload an image or PDF — Claude reads the names, times, and zones automatically</div>
         </div>
 
         <!-- Scanning state -->
         <div class="scan-state hidden" id="scan-loading">
           <div class="scan-spinner"></div>
-          <div class="scan-text">Reading your schedule...</div>
+          <div class="scan-text" id="scan-text">Reading your schedule...</div>
         </div>
 
         <!-- Parsed results -->
@@ -190,14 +190,6 @@
           <div class="parsed-header">
             <span class="parsed-title">Detected from schedule</span>
             <span class="parsed-count" id="parsed-count"></span>
-          </div>
-          <div class="parsed-assign-warning hidden" id="parsed-assign-warning">
-            <div style="padding:12px 14px; border-bottom:1px solid var(--gray-100); background: #FFF8E6; color: var(--amber); font-weight:600;">Auto-assigned roles (no tasks detected)</div>
-            <div style="padding:10px 14px; font-size:13px; color:var(--gray-800);" id="parsed-assign-list"></div>
-            <div style="padding:10px 14px; border-top:1px solid var(--gray-100); display:flex; gap:8px;">
-              <button class="btn-primary" onclick="importSchedule()">Import all into board</button>
-              <button class="btn-secondary" onclick="resetUpload()">Scan again / Cancel</button>
-            </div>
           </div>
           <div class="parsed-list" id="parsed-list"></div>
           <div class="parsed-actions">
