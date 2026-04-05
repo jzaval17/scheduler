@@ -55,3 +55,29 @@ self.addEventListener('notificationclick', function(event) {
     if (clients.openWindow) return clients.openWindow(urlToOpen);
   }));
 });
+
+// Listen for messages from the page to schedule notifications inside the service worker.
+self.addEventListener('message', event => {
+  try {
+    const msg = event.data;
+    if (!msg || msg.type !== 'scheduleNotification') return;
+    const title = msg.title || 'Scheduler';
+    const body = msg.body || '';
+    const tag = msg.tag;
+    const when = Number(msg.time) || Date.now();
+    const data = msg.data || {};
+    // If TimestampTrigger is supported in the service worker, use it to schedule.
+    if (typeof TimestampTrigger !== 'undefined') {
+      try {
+        self.registration.showNotification(title, { body, tag, showTrigger: new TimestampTrigger(when), data });
+      } catch (e) {
+        // fallback: show immediate notification if scheduling fails
+        self.registration.showNotification(title, { body, tag, data });
+      }
+    } else {
+      // TimestampTrigger not available: attempt best-effort immediate fallback
+      // We cannot reliably schedule from SW without the API, so just create an immediate notification as fallback.
+      self.registration.showNotification(title, { body, tag, data });
+    }
+  } catch (e) {}
+});

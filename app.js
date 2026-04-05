@@ -334,7 +334,17 @@ function renderBoard() {
     }
 
     const order = { overdue: 0, break: 1, lunch: 2, available: 3, not_here: 4 };
-    [...zp].sort((a, b) => (order[a.status] ?? 3) - (order[b.status] ?? 3)).forEach(p => {
+    [...zp].sort((a, b) => {
+      // Absent and clocked out should appear at the bottom
+      if (a.absent && !b.absent) return 1;
+      if (!a.absent && b.absent) return -1;
+      if (a.clockedOut && !b.clockedOut) return 1;
+      if (!a.clockedOut && b.clockedOut) return -1;
+      const oa = order[a.status] ?? 3;
+      const ob = order[b.status] ?? 3;
+      if (oa === ob) return (a.name || '').localeCompare(b.name || '');
+      return oa - ob;
+    }).forEach(p => {
       // Determine active break or next scheduled
       const activeBreak = p.breaks ? p.breaks.find(b => b.status === 'active' || b.status === 'overdue') : null;
       const next = getNextScheduledBreak(p);
@@ -1355,16 +1365,22 @@ function checkPushNotifications() {
         else if (b.status === 'scheduled' && b.scheduledMs && b.scheduledMs > now) {
           const key = 'trigger:' + b.id;
           if (!scheduledTriggers.has(key) && Notification.permission === 'granted' && 'serviceWorker' in navigator) {
-            // Best-effort: try to use the Notification Triggers API via the service worker
             try {
               navigator.serviceWorker.getRegistration().then(reg => {
                 if (!reg) return;
-                // TimestampTrigger may be available in some browsers (Chrome). Use it when present.
-                if (typeof TimestampTrigger !== 'undefined') {
-                  const title = b.type === 'lunch' ? 'Lunch due' : 'Break due';
-                  reg.showNotification(title, { body: `${p.name}'s ${b.type} is due — ${ZONE_LABELS[p.zone]}`, tag: key, showTrigger: new TimestampTrigger(b.scheduledMs), data: { personId: p.id, breakId: b.id } });
+                // Send a message to the service worker to schedule the notification from inside the SW.
+                // This is more reliable than calling showNotification from the page.
+                try {
+                  reg.active?.postMessage({
+                    type: 'scheduleNotification',
+                    title: b.type === 'lunch' ? 'Lunch due' : 'Break due',
+                    body: `${p.name}'s ${b.type} is due — ${ZONE_LABELS[p.zone]}`,
+                    tag: key,
+                    time: b.scheduledMs,
+                    data: { personId: p.id, breakId: b.id }
+                  });
                   scheduledTriggers.add(key);
-                }
+                } catch (e) {}
               }).catch(() => {});
             } catch (e) {}
           }
