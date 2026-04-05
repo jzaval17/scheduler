@@ -267,6 +267,22 @@ body {
 .break-badge.br-active { background: var(--amber-light); color: var(--amber); border-color: transparent; }
 .break-badge.br-overdue { background: var(--danger-light); color: var(--danger); border-color: transparent; }
 
+/* Notification bell in topbar */
+.notif-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: 10px; border: none; background: transparent; cursor: pointer;
+  margin-bottom: 6px; padding: 0; position: relative;
+}
+.notif-btn svg { display: block; }
+.notif-btn.hidden { display: none; }
+.notif-count {
+  position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--red); color: #fff; font-size: 11px; font-weight: 700; border-radius: 12px; padding: 0 4px;
+}
+.notif-count.hidden { display: none; }
+.notif-btn.pulse { animation: notif-pulse 1s ease-in-out; }
+@keyframes notif-pulse { 0% { transform: scale(1); } 50% { transform: scale(1.08); } 100% { transform: scale(1); } }
+
 .status-badge {
   font-size: 11px; padding: 3px 9px; border-radius: 20px;
   font-weight: 600; white-space: nowrap; flex-shrink: 0;

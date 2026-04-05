@@ -533,6 +533,16 @@ function renderAlerts() {
   const urgentCount = liveAlerts.filter(a => a.type === 'urgent').length;
   const badge = document.getElementById('alert-count');
   if (badge) { badge.textContent = urgentCount; badge.classList.toggle('hidden', urgentCount === 0); }
+  // Toggle topbar notification bell and count
+  const notifBtn = document.getElementById('notif-btn');
+  const notifCount = document.getElementById('notif-count');
+  if (notifBtn) {
+    notifBtn.classList.toggle('hidden', liveAlerts.length === 0);
+    if (notifCount) {
+      notifCount.textContent = String(liveAlerts.length || '');
+      notifCount.classList.toggle('hidden', liveAlerts.length === 0);
+    }
+  }
 
   if (liveAlerts.length === 0) { el.innerHTML = '<div class="empty-small">No active alerts. All good!</div>'; return; }
   el.innerHTML = liveAlerts.map(a => {
@@ -1175,6 +1185,15 @@ function pushAlert(alert) {
   alert.id = alert.id || ('alert-' + alertIdCounter++);
   alert.ts = Date.now();
   if (!alerts.find(a => a.id === alert.id && a.type === alert.type)) alerts.unshift(alert);
+  // Pulse the topbar notification bell briefly when a new alert is pushed
+  try {
+    const nb = document.getElementById('notif-btn');
+    if (nb) {
+      nb.classList.remove('hidden');
+      nb.classList.add('pulse');
+      setTimeout(() => nb.classList.remove('pulse'), 1200);
+    }
+  } catch (e) {}
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────
