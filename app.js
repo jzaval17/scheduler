@@ -3,10 +3,9 @@ const ZONE_MAX = { checklanes: 2, sco: 2, service: 1, driveup: 1 };
 const ZONE_LABELS = { checklanes: 'Checklanes', sco: 'SCO', service: 'Service Desk', driveup: 'Drive Up' };
 const BREAK_DUR = { break: 15, lunch: 30, lunch60: 60 };
 
-// ── IMPORTANT: Paste your Anthropic API key here ──────────────────
-// Get one free at https://console.anthropic.com
-const ANTHROPIC_API_KEY = 'YOUR_API_KEY_HERE';
-// ─────────────────────────────────────────────────────────────────
+// The Anthropic API key is no longer stored in the client. Requests
+// are proxied to a server-side function at `/api/anthropic` which reads
+// the key from server environment variables (e.g. Vercel Environment Variables).
 
 let people = [];
 let alerts = [];
@@ -372,11 +371,8 @@ async function handleFileUpload(input) {
   const file = input.files[0];
   if (!file) return;
 
-  if (!ANTHROPIC_API_KEY || ANTHROPIC_API_KEY === 'YOUR_API_KEY_HERE') {
-    showToast('Add your API key in app.js first — get one free at console.anthropic.com');
-    input.value = '';
-    return;
-  }
+  // We no longer expect an API key in the client. The request is sent to
+  // the server-side proxy which holds the API key in an environment variable.
 
   document.getElementById('upload-box').classList.add('hidden');
   document.getElementById('scan-loading').classList.remove('hidden');
@@ -392,14 +388,10 @@ async function handleFileUpload(input) {
       ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } }
       : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } };
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    // Send to server-side proxy which attaches the API key from env vars.
+    const response = await fetch('/api/anthropic', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 2000,

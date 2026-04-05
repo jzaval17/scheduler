@@ -35,17 +35,17 @@ Go to https://github.com and sign up for free.
 5. In about 60 seconds, Vercel gives you a URL like `break-manager-abc123.vercel.app`
 
 ### Step 4 — Add your Anthropic API key (for the scan feature)
-The AI schedule scanner needs an API key to read your photos:
-1. In Vercel, go to your project → **Settings** → **Environment Variables**
-2. You don't need to add the key directly in code — the app calls the Anthropic API directly from the browser
-3. Get a free API key at https://console.anthropic.com
-4. The key goes directly in the Upload tab when you scan (or you can hardcode it in app.js for personal use — see note below)
+The AI schedule scanner needs an API key to read your photos. To avoid exposing the key in browser code, this project includes a small server-side proxy (serverless function) that forwards requests to Anthropic and reads the API key from environment variables.
 
-> **Note on the API key:** For a personal app only you use, you can open `app.js`,
-> find the fetch call to `api.anthropic.com`, and add your key to the headers:
-> `"x-api-key": "sk-ant-YOUR-KEY-HERE"`
-> Since this is a private app just for you, that's fine.
-> Never share the URL publicly if you hardcode the key.
+1. Get an API key at https://console.anthropic.com
+2. In Vercel, go to your project → **Settings** → **Environment Variables** and add `ANTHROPIC_API_KEY` with your key.
+3. If developing locally with `vercel dev` or another local server, create a `.env` file (not committed) and add:
+
+```
+ANTHROPIC_API_KEY=sk-ant-YOUR_KEY_HERE
+```
+
+The app will POST the uploaded image to `/api/anthropic` which uses the server-side `ANTHROPIC_API_KEY`. Do not hardcode the key into `app.js` or any client-side file.
 
 ### Step 5 — Install to your phone
 1. Open the Vercel URL in Safari (iPhone) or Chrome (Android)
