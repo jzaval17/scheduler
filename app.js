@@ -151,6 +151,8 @@ function markBreakDone(personId) {
       if (!target.startMs && target.scheduledMs) target.startMs = target.scheduledMs;
       syncPersonStatus(p);
       saveState();
+      // cancel any scheduled notification for this break
+      cancelScheduledNotification('trigger:' + target.id);
       pushUndo({ action: 'markBreakDone', personId: p.id, breakId: target.id, prev, message: `${p.name} — ${target.type} marked taken` });
       showToast(`${p.name} — ${target.type} marked taken`);
       render();
@@ -455,6 +457,7 @@ function renderBoard() {
         const soonClass = soonFlag ? ' soon' : '';
         card.innerHTML = `<div class="avatar ${avClass}${animClass}">${initials(p.name)}</div><div class="person-info"><div class="person-name">${availHtml} ${p.name} ${takenHtml} ${lateHtml} ${absentHtml} ${clockOutHtml}</div>${breakBadges}${paidHtml}<div class="person-timer${p.status === 'overdue' ? ' overdue' : ''}">${timerText}</div>${noteHtml}${editorHtml}${actions}</div><span class="status-badge ${sbClass}">${sbLabel}</span>`;
         if (soonFlag) card.classList.add('soon');
+        if (p.clockedOut) card.classList.add('clocked-out');
         card.onclick = () => openModal(p.id);
       list.appendChild(card);
     });
@@ -753,6 +756,8 @@ function startBreak(personId, type) {
   target.startMs = now;
   p.status = type === 'lunch' ? 'lunch' : 'break';
   p.type = type; p.startMs = now;
+  // Cancel any scheduled notification for this break since it's now active
+  cancelScheduledNotification('trigger:' + target.id);
   saveState(); showToast(`${p.name} — ${type==='break'?`${BREAK_DUR['break']}-min break`:type==='lunch'?`${BREAK_DUR['lunch']}-min lunch`:''} started`); render();
 }
 
@@ -798,7 +803,9 @@ function saveBreakEdits(personId) {
     // ensure status remains scheduled if not active/done
     if (!b.status) b.status = 'scheduled';
   });
+  // After edits, cancel and reschedule notifications for this person
   syncPersonStatus(p); saveState(); showToast('Breaks updated'); render();
+  cancelScheduledNotificationsForPerson(p.id);
 }
 
 function manualClockOut(personId) {
@@ -811,6 +818,8 @@ function manualClockOut(personId) {
   syncPersonStatus(p);
   saveState();
   pushAlert({ type: 'ok', msg: `${p.name} clocked out manually`, personId: p.id });
+  // Cancel any scheduled notifications for this person
+  cancelScheduledNotificationsForPerson(p.id);
   showToast(`${p.name} clocked out`);
   render();
 }
@@ -880,6 +889,7 @@ function toggleAbsent(personId) {
   pushUndo({ action: 'toggleAbsent', personId, prev, message: p.absent ? `${p.name} marked absent` : 'Absent cleared' });
   if (p.absent) pushAlert({ type: 'urgent', msg: `${p.name} marked absent` });
   saveState(); render();
+  if (p.absent) cancelScheduledNotificationsForPerson(p.id);
 }
 
 function markReturned(personId) {
@@ -892,11 +902,15 @@ function markReturned(personId) {
   }
   pushAlert({ type: 'ok', msg: `${p.name} returned` });
   p.status = 'available'; p.startMs = null;
+  // Cancel any scheduled notifications for this person (they returned)
+  cancelScheduledNotificationsForPerson(p.id);
   saveState(); showToast(`${p.name} marked as returned`); render();
 }
 
 function removePerson(personId) {
   people = people.filter(x => x.id !== personId);
+  // Cancel any scheduled notifications for removed person
+  cancelScheduledNotificationsForPerson(personId);
   saveState(); showToast('Team member removed'); render();
 }
 
@@ -1327,11 +1341,82 @@ function sendPushNotification(title, body) {
 }
 let notifiedPush = new Set();
 let scheduledTriggers = new Set(); // track break ids we've tried to schedule via SW
+// Persistent scheduled notifications (fallbacks when SW scheduling not supported)
+const scheduledNotifications = new Map(); // tag -> { title, body, tag, time, data }
+const scheduledTimeouts = new Map(); // tag -> timeoutId
+
+function saveScheduledNotifications() {
+  try { localStorage.setItem('bm_scheduled_notifications', JSON.stringify(Array.from(scheduledNotifications.entries()))); } catch(e){}
+}
+
+function restoreScheduledNotifications() {
+  try {
+    const raw = localStorage.getItem('bm_scheduled_notifications');
+    if (!raw) return;
+    const arr = JSON.parse(raw);
+    arr.forEach(([tag, obj]) => {
+      scheduledNotifications.set(tag, obj);
+      scheduleClientFallback(obj);
+    });
+  } catch(e) {}
+}
+
+function scheduleClientFallback(obj) {
+  // obj: { title, body, tag, time, data }
+  try {
+    if (!obj || !obj.tag) return;
+    const now = Date.now();
+    // clear existing timeout if present
+    if (scheduledTimeouts.has(obj.tag)) {
+      clearTimeout(scheduledTimeouts.get(obj.tag));
+      scheduledTimeouts.delete(obj.tag);
+    }
+    const delay = Math.max(0, (Number(obj.time) || now) - now);
+    const tid = setTimeout(() => {
+      try {
+        // Only notify if permission granted and recipient still present and not absent/clocked out
+        if (Notification.permission === 'granted') {
+          // double-check person still eligible
+          const personId = obj.data && obj.data.personId;
+          const p = people.find(x => x.id === personId);
+          if (!p || p.absent || p.clockedOut) {
+            // cancel
+            cancelScheduledNotification(obj.tag);
+            return;
+          }
+          sendPushNotification(obj.title, obj.body);
+          pushAlert({ id: obj.tag, type: 'info', msg: obj.body, personId: personId });
+        }
+      } catch (e) {}
+      // cleanup after firing
+      cancelScheduledNotification(obj.tag);
+    }, delay);
+    scheduledTimeouts.set(obj.tag, tid);
+  } catch(e) {}
+}
+
+function cancelScheduledNotification(tag) {
+  try {
+    if (!tag) return;
+    if (scheduledTimeouts.has(tag)) { clearTimeout(scheduledTimeouts.get(tag)); scheduledTimeouts.delete(tag); }
+    if (scheduledNotifications.has(tag)) { scheduledNotifications.delete(tag); saveScheduledNotifications(); }
+    // also remove from scheduledTriggers set if present
+    if (scheduledTriggers.has(tag)) scheduledTriggers.delete(tag);
+  } catch(e) {}
+}
+
+function cancelScheduledNotificationsForPerson(personId) {
+  try {
+    for (const [tag, obj] of Array.from(scheduledNotifications.entries())) {
+      if (obj && obj.data && obj.data.personId === personId) cancelScheduledNotification(tag);
+    }
+  } catch(e) {}
+}
 function checkPushNotifications() {
   if (!('Notification' in window)) return;
   // Notify for active/overdue breaks
   people.forEach(p => {
-    if (p.absent) return; // do not notify for absent team members
+    if (p.absent || p.clockedOut) return; // do not notify for absent or clocked-out team members
     // overdue break
     if (p.status === 'overdue') {
       const key = 'overdue:' + p.id;
@@ -1366,10 +1451,9 @@ function checkPushNotifications() {
           const key = 'trigger:' + b.id;
           if (!scheduledTriggers.has(key) && Notification.permission === 'granted' && 'serviceWorker' in navigator) {
             try {
-              navigator.serviceWorker.getRegistration().then(reg => {
+              navigator.serviceWorker.ready.then(reg => {
                 if (!reg) return;
                 // Send a message to the service worker to schedule the notification from inside the SW.
-                // This is more reliable than calling showNotification from the page.
                 try {
                   reg.active?.postMessage({
                     type: 'scheduleNotification',
@@ -1379,6 +1463,11 @@ function checkPushNotifications() {
                     time: b.scheduledMs,
                     data: { personId: p.id, breakId: b.id }
                   });
+                  // Persist and also schedule a client-side fallback
+                  const obj = { title: b.type === 'lunch' ? 'Lunch due' : 'Break due', body: `${p.name}'s ${b.type} is due — ${ZONE_LABELS[p.zone]}`, tag: key, time: b.scheduledMs, data: { personId: p.id, breakId: b.id } };
+                  scheduledNotifications.set(key, obj);
+                  saveScheduledNotifications();
+                  scheduleClientFallback(obj);
                   scheduledTriggers.add(key);
                 } catch (e) {}
               }).catch(() => {});
@@ -1447,6 +1536,8 @@ function manualRefresh() {
 loadState();
 requestNotificationPermission();
 render();
+// Restore any previously scheduled notifications (client-side fallbacks)
+restoreScheduledNotifications();
 setInterval(() => { tick(); checkPushNotifications(); }, 15000);
 updateClock();
 setInterval(updateClock, 10000);
