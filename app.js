@@ -1,5 +1,5 @@
 // ── State ──────────────────────────────────────────────────────────
-const ZONE_MAX = { checklanes: 2, sco: 2, service: 1, driveup: 1 };
+const ZONE_MAX = { checklanes: 10, sco: 2, service: 1, driveup: 5 };
 const TOTAL_ON_BREAK_MAX = 3; // overall max people on break before critical warning
 const ZONE_LABELS = { checklanes: 'Checklanes', sco: 'SCO', service: 'Service Desk', driveup: 'Drive Up' };
 const BREAK_DUR = { break: 15, lunch: 45, lunch60: 60 };
@@ -276,7 +276,7 @@ function renderBoard() {
         if (activeBreak.status === 'overdue') {
           avClass = 'av-overdue'; sbClass = 'sb-overdue'; sbLabel = 'Overdue!'; timerText = `+${Math.abs(remaining)} min overdue`;
         } else if (activeBreak.type === 'break') {
-          avClass = 'av-break'; sbClass = 'sb-break'; sbLabel = '15-min break'; timerText = remaining > 0 ? `${remaining} min left` : 'time up';
+          avClass = 'av-break'; sbClass = 'sb-break'; sbLabel = `${BREAK_DUR['break']}-min break`; timerText = remaining > 0 ? `${remaining} min left` : 'time up';
         } else {
           avClass = 'av-lunch'; sbClass = 'sb-lunch'; sbLabel = `${dur}-min lunch`; timerText = remaining > 0 ? `${remaining} min left` : 'time up';
         }
@@ -286,6 +286,12 @@ function renderBoard() {
       const takenHtml = taken ? '<span class="taken-badge">✓</span>' : '';
       const lateHtml = p.late ? '<span class="person-flag late">Late</span>' : '';
       const absentHtml = p.absent ? '<span class="person-flag absent">Absent</span>' : '';
+      // Availability sign: always show, with color variant based on current status
+      let availClass = 'avail-available';
+      if (p.status === 'break') availClass = 'avail-break';
+      else if (p.status === 'lunch') availClass = 'avail-lunch';
+      else if (p.status === 'overdue') availClass = 'avail-overdue';
+      const availHtml = `<span class="avail-sign ${availClass}">${p.status === 'available' ? 'Available' : (p.status === 'break' ? 'Available' : (p.status === 'lunch' ? 'Available' : 'Available'))}</span>`;
       const shiftLine = (p.shiftStartMs && p.shiftEndMs) ? `${fmtTime(p.shiftStartMs)} — ${fmtTime(p.shiftEndMs)}` : '';
       const paid = computePaidHours(p);
       const paidHtml = (paid !== null && paid !== undefined) ? `<div class="person-shift">${shiftLine} · ${paid} hrs</div>` : (shiftLine ? `<div class="person-shift">${shiftLine}</div>` : '');
@@ -310,9 +316,12 @@ function renderBoard() {
           editorHtml = `<div class="inline-editor"><textarea id="inline-note-${p.id}">${p.note||''}</textarea><div style="display:flex;flex-direction:column;gap:6px;"><button class="btn-primary" onclick="event.stopPropagation();saveInline('${p.id}')">Save</button><button class="btn-secondary" onclick="event.stopPropagation();cancelInline()">Cancel</button></div></div>`;
         }
 
-        const actions = `<div style="display:flex;gap:6px;margin-top:8px"><button class="btn-tiny" onclick="event.stopPropagation();startInline('${p.id}')">Edit</button><button class="btn-tiny" onclick="event.stopPropagation();toggleLate('${p.id}')">${p.late? 'Clear late':'Late'}</button><button class="btn-tiny" onclick="event.stopPropagation();toggleAbsent('${p.id}')">${p.absent? 'Clear absent':'Absent'}</button>${(next && next.scheduledMs && next.scheduledMs <= Date.now())?`<button class="btn-tiny" onclick="event.stopPropagation();markBreakDone('${p.id}')">Mark taken</button>`:''}</div>`;
+        const editActions = `<button class="btn-tiny" onclick="event.stopPropagation();openModal('${p.id}')">Edit breaks</button>`;
+        const actions = `<div style="display:flex;gap:6px;margin-top:8px"><button class="btn-tiny" onclick="event.stopPropagation();startInline('${p.id}')">Edit</button><button class="btn-tiny" onclick="event.stopPropagation();toggleLate('${p.id}')">${p.late? 'Clear late':'Late'}</button><button class="btn-tiny" onclick="event.stopPropagation();toggleAbsent('${p.id}')">${p.absent? 'Clear absent':'Absent'}</button>${(next && next.scheduledMs && next.scheduledMs <= Date.now())?`<button class="btn-tiny" onclick="event.stopPropagation();markBreakDone('${p.id}')">Mark taken</button>`:''}${editActions}</div>`;
 
-        card.innerHTML = `<div class="avatar ${avClass}">${initials(p.name)}</div><div class="person-info"><div class="person-name">${p.name} ${takenHtml} ${lateHtml} ${absentHtml}</div>${paidHtml}<div class="person-timer${p.status === 'overdue' ? ' overdue' : ''}">${timerText}</div>${noteHtml}${editorHtml}${actions}</div><span class="status-badge ${sbClass}">${sbLabel}</span>`;
+        // Add an upbeat animation class when a break is actively running
+        const animClass = (activeBreak && activeBreak.status === 'active') ? ' active-anim' : '';
+        card.innerHTML = `<div class="avatar ${avClass}${animClass}">${initials(p.name)}</div><div class="person-info"><div class="person-name">${availHtml} ${p.name} ${takenHtml} ${lateHtml} ${absentHtml}</div>${paidHtml}<div class="person-timer${p.status === 'overdue' ? ' overdue' : ''}">${timerText}</div>${noteHtml}${editorHtml}${actions}</div><span class="status-badge ${sbClass}">${sbLabel}</span>`;
         card.onclick = () => openModal(p.id);
       list.appendChild(card);
     });
@@ -515,6 +524,12 @@ function openModal(personId) {
     actionsHtml += `<div class="modal-action-row"><button class="modal-btn ok" onclick="markBreakDone('${p.id}');closeModal()">Mark break taken</button></div>`;
   }
   actionsHtml += `<div class="modal-action-row"><button class="modal-btn remove" onclick="removePerson('${p.id}');closeModal()">Remove</button></div>`;
+  // Build editable break rows for this person
+  const breaksHtml = (p.breaks || []).map(b => {
+    const tval = b.scheduledTime || (b.scheduledMs ? fmtTime(b.scheduledMs) : '');
+    return `<div class="modal-break-row" style="display:flex;gap:8px;align-items:center;margin-top:8px"><div style="flex:1"><strong>${b.type.charAt(0).toUpperCase()+b.type.slice(1)}</strong><div style="font-size:12px;color:var(--gray-400)">Current: ${tval}</div></div><div style="width:42%"><input id="modal-break-time-${b.id}" class="form-input" value="${tval}"></div><div style="width:26%"><input id="modal-break-dur-${b.id}" class="form-input" value="${b.dur || (b.type==='lunch'?BREAK_DUR['lunch']:15)}"></div><div><button class="btn-tiny" onclick="event.stopPropagation();removeBreak('${p.id}','${b.id}');return false;">Remove</button></div></div>`;
+  }).join('');
+
   body.innerHTML = `${actionsHtml}
     <div class="modal-info-row"><span class="modal-info-label">Status</span><span class="modal-info-value">${p.status.charAt(0).toUpperCase()+p.status.slice(1)}</span></div>
     <div class="modal-info-row"><span class="modal-info-label">Zone</span><span class="modal-info-value">${ZONE_LABELS[p.zone]}</span></div>
@@ -522,6 +537,7 @@ function openModal(personId) {
     <div class="modal-info-row"><span class="modal-info-label">Next break</span><span class="modal-info-value">${(next && next.scheduledTime) ? next.scheduledTime : (p.scheduledTime||'—')}</span></div>
     <div class="modal-info-row"><span class="modal-info-label">Break started</span><span class="modal-info-value">${p.startMs?fmtTime(p.startMs):'—'}</span></div>
     <div class="modal-info-row"><span class="modal-info-label">Time remaining</span><span class="modal-info-value">${isActive(p)?(remaining>0?remaining+' min':'Overdue by '+Math.abs(remaining)+' min'):'—'}</span></div>
+    <div style="margin-top:10px"><h4 style="margin:0 0 6px 0">Edit breaks</h4>${breaksHtml || '<div class="empty-small">No scheduled breaks</div>'}<div style="margin-top:8px"><button class="modal-btn" onclick="saveBreakEdits('${p.id}');closeModal()">Save breaks</button></div></div>
     <div style="margin-top:10px"><label style="display:block;font-size:12px;color:var(--gray-400);margin-bottom:6px">Note</label><textarea id="modal-note" class="modal-note">${p.note || ''}</textarea></div>
     <div style="display:flex;gap:8px;margin-top:8px;"><button class="modal-btn" onclick="saveNote('${p.id}');closeModal()">Save note</button><button class="modal-btn" onclick="toggleLate('${p.id}');closeModal()">${p.late? 'Clear late':'Mark late'}</button><button class="modal-btn" onclick="toggleAbsent('${p.id}');closeModal()">${p.absent? 'Clear absent':'Mark absent'}</button></div>`;
   overlay.classList.remove('hidden');
@@ -535,9 +551,25 @@ function closeModal() {
 function startBreak(personId, type) {
   const p = people.find(x => x.id === personId);
   if (!p) return;
-    p.status = type === 'lunch' ? 'lunch' : type;
-  p.type = type; p.startMs = Date.now();
-    saveState(); showToast(`${p.name} — ${type==='break'?`${BREAK_DUR['break']}-min break`:type==='lunch'?`${BREAK_DUR['lunch']}-min lunch`:''} started`); render();
+  const now = Date.now();
+  // Find a scheduled break of this type to mark active; prefer nearest scheduled time
+  if (!p.breaks) p.breaks = [];
+  let target = null;
+  const scheduled = p.breaks.filter(b => b.type === type && b.status === 'scheduled');
+  if (scheduled.length > 0) {
+    scheduled.sort((a, b) => Math.abs((a.scheduledMs || now) - now) - Math.abs((b.scheduledMs || now) - now));
+    target = scheduled[0];
+  }
+  if (!target) {
+    // create an ad-hoc break record
+    target = { id: uid(), type, scheduledMs: now, scheduledTime: fmtTime(now), status: 'scheduled', startMs: null, dur: BREAK_DUR[type] || 15 };
+    p.breaks.push(target);
+  }
+  target.status = 'active';
+  target.startMs = now;
+  p.status = type === 'lunch' ? 'lunch' : 'break';
+  p.type = type; p.startMs = now;
+  saveState(); showToast(`${p.name} — ${type==='break'?`${BREAK_DUR['break']}-min break`:type==='lunch'?`${BREAK_DUR['lunch']}-min lunch`:''} started`); render();
 }
 
 function saveNote(personId) {
@@ -549,6 +581,47 @@ function saveNote(personId) {
   saveState();
   showToast('Note saved');
   render();
+}
+
+// Save edited breaks from the modal. Validates lunch cannot be at/after 5 hours into shift.
+function saveBreakEdits(personId) {
+  const p = people.find(x => x.id === personId);
+  if (!p || !p.breaks) return;
+  p.breaks.forEach(b => {
+    const timeEl = document.getElementById('modal-break-time-' + b.id);
+    const durEl = document.getElementById('modal-break-dur-' + b.id);
+    if (timeEl) {
+      const raw = timeEl.value.trim();
+      const parsed = parseMilTime(raw);
+      if (parsed) {
+        b.scheduledMs = parsed.getTime();
+        b.scheduledTime = parsed.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      }
+    }
+    if (durEl) {
+      const v = Number(durEl.value) || b.dur || (b.type === 'lunch' ? BREAK_DUR['lunch'] : 15);
+      b.dur = v;
+    }
+    // If lunch, enforce 5-hour rule relative to shiftStartMs
+    if (b.type === 'lunch' && p.shiftStartMs) {
+      const limitMs = p.shiftStartMs + 5 * 3600000;
+      if (b.scheduledMs && b.scheduledMs >= limitMs) {
+        b.scheduledMs = limitMs - 60000; // move to 1 minute before 5-hour mark
+        b.scheduledTime = new Date(b.scheduledMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        showToast('Lunch adjusted: cannot schedule at/after 5 hours into shift');
+      }
+    }
+    // ensure status remains scheduled if not active/done
+    if (!b.status) b.status = 'scheduled';
+  });
+  syncPersonStatus(p); saveState(); showToast('Breaks updated'); render();
+}
+
+function removeBreak(personId, breakId) {
+  const p = people.find(x => x.id === personId);
+  if (!p || !p.breaks) return;
+  p.breaks = p.breaks.filter(b => b.id !== breakId);
+  syncPersonStatus(p); saveState(); showToast('Break removed'); render();
 }
 
 // Undo support
@@ -691,6 +764,22 @@ function addManual() {
         if (breaks[i].type === 'lunch') { breaks[i].date = mid; breaks[i].dur = Number(lunchDurVal); }
       }
       showToast('Lunch time was outside the shift — placed at midpoint');
+    }
+  }
+
+  // Enforce lunch cannot be scheduled at or after 5 hours into the shift.
+  if (sStart) {
+    const limitMs = sStart.getTime() + 5 * 3600000; // 5 hours after shift start
+    for (let i = 0; i < breaks.length; i++) {
+      const b = breaks[i];
+      if (b && b.type === 'lunch' && b.date) {
+        if (b.date.getTime() >= limitMs) {
+          // move lunch to 1 minute before the 5-hour mark
+          b.date = new Date(limitMs - 60000);
+          b.dur = Number(lunchDurVal);
+          showToast('Lunch adjusted: cannot schedule at/after 5 hours into shift');
+        }
+      }
     }
   }
 

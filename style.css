@@ -205,6 +205,19 @@ body {
 .av-lunch     { background: var(--blue-light); color: var(--blue); }
 .av-overdue   { background: var(--danger-light); color: var(--danger); }
 
+/* Active-break animation: subtle pulsing ring to draw attention */
+.avatar.active-anim {
+  animation: avatar-glow 1.6s infinite ease-in-out;
+}
+.avatar.active-anim {
+  box-shadow: 0 0 0 0 rgba(255,153,51,0.0);
+}
+@keyframes avatar-glow {
+  0% { box-shadow: 0 0 0 0 rgba(255,153,51,0.0); transform: scale(1); }
+  50% { box-shadow: 0 0 18px 4px rgba(255,153,51,0.12); transform: scale(1.03); }
+  100% { box-shadow: 0 0 0 0 rgba(255,153,51,0.0); transform: scale(1); }
+}
+
 .person-info { flex: 1; min-width: 0; }
 .person-name { font-size: 14px; font-weight: 500; color: var(--gray-800); }
 .taken-badge { display: inline-block; margin-left: 8px; background: var(--green-light); color: var(--green); padding: 2px 6px; border-radius: 10px; font-size: 12px; font-weight: 700; }
@@ -225,6 +238,20 @@ body {
 .person-detail { font-size: 12px; color: var(--gray-400); margin-top: 1px; }
 .person-timer { font-size: 12px; color: var(--gray-400); margin-top: 1px; font-family: var(--font-mono); }
 .person-timer.overdue { color: var(--danger); font-weight: 600; }
+
+/* Availability sign shown next to the person's name; colors vary by state */
+.avail-sign {
+  display: inline-block;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  margin-right: 8px;
+  font-weight: 700;
+}
+.avail-available { background: var(--green-light); color: var(--green); }
+.avail-break { background: var(--amber-light); color: var(--amber); }
+.avail-lunch { background: var(--blue-light); color: var(--blue); }
+.avail-overdue { background: var(--danger-light); color: var(--danger); }
 
 .status-badge {
   font-size: 11px; padding: 3px 9px; border-radius: 20px;
