@@ -79,11 +79,17 @@ function uid() { return Date.now() + Math.random().toString(36).slice(2, 7); }
 // Helpers for new data model: people have `breaks` array. Each break: { id, type, scheduledMs, scheduledTime, status: 'scheduled'|'active'|'overdue'|'done', startMs, dur }
 function syncPersonStatus(person) {
   if (!person || !person.breaks) return;
+  const now = Date.now();
   const active = person.breaks.find(b => b.status === 'active' || b.status === 'overdue');
   if (active) {
     person.status = active.status === 'overdue' ? 'overdue' : (active.type === 'break' ? 'break' : 'lunch');
     person.type = active.type;
     person.startMs = active.startMs || null;
+  } else if (person.shiftStartMs && now < person.shiftStartMs) {
+    // Shift hasn't started yet — not here / unavailable
+    person.status = 'not_here';
+    person.type = null;
+    person.startMs = null;
   } else {
     person.status = 'available';
     person.type = null;
@@ -281,7 +287,7 @@ function renderBoard() {
       list.appendChild(em); return;
     }
 
-    const order = { overdue: 0, break: 1, lunch: 2, available: 3 };
+    const order = { overdue: 0, break: 1, lunch: 2, available: 3, not_here: 4 };
     [...zp].sort((a, b) => (order[a.status] ?? 3) - (order[b.status] ?? 3)).forEach(p => {
       // Determine active break or next scheduled
       const activeBreak = p.breaks ? p.breaks.find(b => b.status === 'active' || b.status === 'overdue') : null;
@@ -312,7 +318,12 @@ function renderBoard() {
       if (p.status === 'break') availClass = 'avail-break';
       else if (p.status === 'lunch') availClass = 'avail-lunch';
       else if (p.status === 'overdue') availClass = 'avail-overdue';
-      const availHtml = `<span class="avail-sign ${availClass}">${p.status === 'available' ? 'Available' : (p.status === 'break' ? 'Available' : (p.status === 'lunch' ? 'Available' : 'Available'))}</span>`;
+      else if (p.status === 'not_here') availClass = 'avail-not-here';
+      // Display proper availability label: unavailable when on break/lunch/overdue/not here
+      let availLabel = 'Available';
+      if (p.status === 'break' || p.status === 'lunch' || p.status === 'overdue') availLabel = 'Unavailable';
+      if (p.status === 'not_here') availLabel = 'Not here';
+      const availHtml = `<span class="avail-sign ${availClass}">${availLabel}</span>`;
       const shiftLine = (p.shiftStartMs && p.shiftEndMs) ? `${fmtTime(p.shiftStartMs)} — ${fmtTime(p.shiftEndMs)}` : '';
       const paid = computePaidHours(p);
       const paidHtml = (paid !== null && paid !== undefined) ? `<div class="person-shift">${shiftLine} · ${paid} hrs</div>` : (shiftLine ? `<div class="person-shift">${shiftLine}</div>` : '');
@@ -377,13 +388,14 @@ function toggleNoteExpand(personId) {
 }
 
 function renderStats() {
-  let avail = 0, onBreak = 0, overdue = 0, upcoming = 0;
+  let avail = 0, onBreak = 0, overdue = 0, upcoming = 0, notHere = 0;
   const now = Date.now();
   const soon = 20 * 60000;
   people.forEach(p => {
     if (p.status === 'overdue') overdue++;
     else if (p.status === 'break' || p.status === 'lunch') onBreak++;
-    else {
+    else if (p.status === 'not_here') notHere++;
+    else if (p.status === 'available') {
       avail++;
       const next = getNextScheduledBreak(p);
       if (next && (next.scheduledMs - now) < soon && (next.scheduledMs - now) > 0) upcoming++;
@@ -394,6 +406,9 @@ function renderStats() {
   if (s('stat-onbreak'))   s('stat-onbreak').textContent = onBreak;
   if (s('stat-overdue'))   s('stat-overdue').textContent = overdue;
   if (s('stat-upcoming'))  s('stat-upcoming').textContent = upcoming;
+  // Optionally show not-here count in the UI by reusing stat-overdue slot when needed
+  const notHereEl = document.getElementById('stat-not-here');
+  if (notHereEl) notHereEl.textContent = notHere;
 }
 
 function renderCoverage() {
@@ -566,8 +581,10 @@ function openModal(personId) {
     return `<div class="modal-break-row" style="display:flex;gap:8px;align-items:center;margin-top:8px"><div style="flex:1"><strong>${b.type.charAt(0).toUpperCase()+b.type.slice(1)}</strong><div style="font-size:12px;color:var(--gray-400)">Current: ${tval}</div></div><div style="width:42%"><input id="modal-break-time-${b.id}" class="form-input" value="${tval}"></div><div style="width:26%"><input id="modal-break-dur-${b.id}" class="form-input" value="${b.dur || (b.type==='lunch'?BREAK_DUR['lunch']:15)}"></div><div><button class="btn-tiny" onclick="event.stopPropagation();removeBreak('${p.id}','${b.id}');return false;">Remove</button></div></div>`;
   }).join('');
 
+  const statusLabel = p.status === 'not_here' ? 'Not here' : (p.status === 'available' ? 'Available' : (p.status === 'break' ? 'On break' : (p.status === 'lunch' ? 'Lunch' : (p.status === 'overdue' ? 'Overdue' : p.status.charAt(0).toUpperCase()+p.status.slice(1)))));
+
   body.innerHTML = `${actionsHtml}
-    <div class="modal-info-row"><span class="modal-info-label">Status</span><span class="modal-info-value">${p.status.charAt(0).toUpperCase()+p.status.slice(1)}</span></div>
+    <div class="modal-info-row"><span class="modal-info-label">Status</span><span class="modal-info-value">${statusLabel}</span></div>
     <div class="modal-info-row"><span class="modal-info-label">Zone</span><span class="modal-info-value">${ZONE_LABELS[p.zone]}</span></div>
     <div class="modal-info-row"><span class="modal-info-label">Shift</span><span class="modal-info-value">${shiftText}</span></div>
     <div class="modal-info-row"><span class="modal-info-label">Next break</span><span class="modal-info-value">${(next && next.scheduledTime) ? next.scheduledTime : (p.scheduledTime||'—')}</span></div>
