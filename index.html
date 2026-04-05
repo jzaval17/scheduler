@@ -217,16 +217,28 @@
               <input type="time" id="manual-shift-start" class="form-input" placeholder="Shift start">
               <input type="time" id="manual-shift-end" class="form-input" placeholder="Shift end">
             </div>
-            <div class="form-row">
-              <input type="time" id="manual-first-break" class="form-input" placeholder="1st break">
-              <input type="time" id="manual-lunch" class="form-input" placeholder="Lunch">
+            <div class="form-row" style="align-items:flex-start; gap:12px;">
+              <div style="flex:1">
+                <label style="display:block;font-size:12px;color:var(--gray-400);margin-bottom:6px">1st break (15 min)</label>
+                <input type="time" id="manual-first-break" class="form-input" placeholder="1st break">
+              </div>
+              <div style="flex:1">
+                <label style="display:block;font-size:12px;color:var(--gray-400);margin-bottom:6px">Lunch</label>
+                <input type="time" id="manual-lunch" class="form-input" placeholder="Lunch">
+              </div>
             </div>
-            <div class="form-row">
-              <input type="time" id="manual-second-break" class="form-input" placeholder="2nd break">
-              <select id="manual-lunch-duration" class="form-select">
-                <option value="30">30-min lunch</option>
-                <option value="60">60-min lunch</option>
-              </select>
+            <div class="form-row" style="align-items:flex-start; gap:12px;">
+              <div style="flex:1">
+                <label style="display:block;font-size:12px;color:var(--gray-400);margin-bottom:6px">2nd break (15 min)</label>
+                <input type="time" id="manual-second-break" class="form-input" placeholder="2nd break">
+              </div>
+              <div style="flex:1">
+                <label style="display:block;font-size:12px;color:var(--gray-400);margin-bottom:6px">Lunch option</label>
+                <select id="manual-lunch-duration" class="form-select">
+                  <option value="none">No lunch</option>
+                  <option value="30" selected>30-min lunch</option>
+                </select>
+              </div>
             </div>
             <div style="margin-top:6px">
               <select id="manual-zone" class="form-select">

@@ -298,13 +298,13 @@ function openModal(personId) {
   av.className = 'modal-avatar ' + avClass;
   av.textContent = initials(p.name);
   nm.textContent = p.name;
-  sub.textContent = ZONE_LABELS[p.zone] + ' · ' + (p.type === 'break' ? '15-min break' : p.type === 'lunch' ? '30-min lunch' : '60-min lunch');
+  sub.textContent = ZONE_LABELS[p.zone] + ' · ' + (p.type === 'break' ? '15-min break' : '30-min lunch');
   const elapsed = getElapsedMin(p);
   const dur = getDur(p);
   const remaining = dur - elapsed;
   const shiftText = (p.shiftStartMs || p.shiftEndMs) ? `${fmtTime(p.shiftStartMs)} — ${fmtTime(p.shiftEndMs)}` : '—';
   let actionsHtml = p.status === 'available'
-    ? `<div class="modal-action-row"><button class="modal-btn start-break" onclick="startBreak('${p.id}','break');closeModal()">Start 15-min break</button><button class="modal-btn start-lunch" onclick="startBreak('${p.id}','lunch');closeModal()">Start 30-min lunch</button></div><div class="modal-action-row"><button class="modal-btn start-lunch" onclick="startBreak('${p.id}','lunch60');closeModal()">Start 60-min lunch</button><button class="modal-btn remove" onclick="removePerson('${p.id}');closeModal()">Remove</button></div>`
+    ? `<div class="modal-action-row"><button class="modal-btn start-break" onclick="startBreak('${p.id}','break');closeModal()">Start 15-min break</button><button class="modal-btn start-lunch" onclick="startBreak('${p.id}','lunch');closeModal()">Start 30-min lunch</button></div><div class="modal-action-row"><button class="modal-btn remove" onclick="removePerson('${p.id}');closeModal()">Remove</button></div>`
     : `<div class="modal-action-row"><button class="modal-btn mark-back" onclick="markReturned('${p.id}');closeModal()">Mark returned</button><button class="modal-btn remove" onclick="removePerson('${p.id}');closeModal()">Remove</button></div>`;
   body.innerHTML = `${actionsHtml}
     <div class="modal-info-row"><span class="modal-info-label">Status</span><span class="modal-info-value">${p.status.charAt(0).toUpperCase()+p.status.slice(1)}</span></div>
@@ -324,9 +324,9 @@ function closeModal() {
 function startBreak(personId, type) {
   const p = people.find(x => x.id === personId);
   if (!p) return;
-  p.status = type === 'lunch60' ? 'lunch' : type;
+    p.status = type === 'lunch' ? 'lunch' : type;
   p.type = type; p.startMs = Date.now();
-  saveState(); showToast(`${p.name} — ${type==='break'?'15-min break':type==='lunch'?'30-min lunch':'60-min lunch'} started`); render();
+    saveState(); showToast(`${p.name} — ${type==='break'?'15-min break':type==='lunch'?'30-min lunch':''} started`); render();
 }
 
 function markReturned(personId) {
@@ -351,7 +351,7 @@ function addManual() {
   const firstBreak = document.getElementById('manual-first-break')?.value;
   const lunch = document.getElementById('manual-lunch')?.value;
   const secondBreak = document.getElementById('manual-second-break')?.value;
-  const lunchDur = parseInt(document.getElementById('manual-lunch-duration')?.value || '30', 10);
+  const lunchDurVal = document.getElementById('manual-lunch-duration')?.value || '30';
   const zone = document.getElementById('manual-zone')?.value || 'checklanes';
 
   const timeToDate = (t) => {
@@ -366,7 +366,7 @@ function addManual() {
   const breaks = [];
 
   if (firstBreak) breaks.push({ type: 'break', date: timeToDate(firstBreak), dur: 15 });
-  if (lunch) breaks.push({ type: lunchDur === 60 ? 'lunch60' : 'lunch', date: timeToDate(lunch), dur: lunchDur });
+  if (lunch && lunchDurVal !== 'none') breaks.push({ type: 'lunch', date: timeToDate(lunch), dur: 30 });
   if (secondBreak) breaks.push({ type: 'break', date: timeToDate(secondBreak), dur: 15 });
 
   if ((!firstBreak && !lunch && !secondBreak) && sStart && sEnd) {
@@ -375,9 +375,9 @@ function addManual() {
       const b = new Date(sStart.getTime() + 2 * 3600000);
       if (b < sEnd) breaks.push({ type: 'break', date: b, dur: 15 });
     }
-    if (durHours > 5) {
+    if (durHours > 5 && lunchDurVal !== 'none') {
       const mid = new Date((sStart.getTime() + sEnd.getTime()) / 2);
-      breaks.push({ type: lunchDur === 60 ? 'lunch60' : 'lunch', date: mid, dur: lunchDur });
+      breaks.push({ type: 'lunch', date: mid, dur: 30 });
     }
     if (durHours > 6) {
       const b2 = new Date(sStart.getTime() + 6 * 3600000);
@@ -607,7 +607,7 @@ function showParsedResults(rawRows) {
   expanded.forEach(row => {
     const div = document.createElement('div');
     div.className = 'parsed-row' + (row.wasAutoAssigned ? ' auto-assigned' : '');
-    const typeLabel = row.type === 'break' ? '15-min break' : row.type === 'lunch60' ? '60-min lunch' : '30-min lunch';
+    const typeLabel = row.type === 'break' ? '15-min break' : '30-min lunch';
     const typeCls = row.type === 'break' ? 'pt-break' : 'pt-lunch';
     div.innerHTML = `
       <div class="parsed-row-main">
