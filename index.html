@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta name="theme-color" content="#CC0000">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Break Manager">
+  <title>Target Break Manager</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+  <div id="app">
+
+    <!-- Top bar -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="target-logo">
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+            <circle cx="11" cy="11" r="10.5" stroke="#fff" stroke-width="1"/>
+            <circle cx="11" cy="11" r="6" fill="#fff" fill-opacity="0.2" stroke="#fff" stroke-width="1"/>
+            <circle cx="11" cy="11" r="2.5" fill="#fff"/>
+          </svg>
+        </div>
+        <span class="topbar-title">Break Manager</span>
+      </div>
+      <div class="topbar-right">
+        <span class="topbar-date" id="topbar-date"></span>
+        <span class="topbar-time" id="topbar-time"></span>
+      </div>
+    </header>
+
+    <!-- Alert banner -->
+    <div class="alert-banner hidden" id="alert-banner" onclick="switchTab('alerts')">
+      <div class="alert-pulse"></div>
+      <span id="alert-text"></span>
+      <span class="alert-arrow">›</span>
+    </div>
+
+    <!-- Stats row -->
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-num" id="stat-available">—</div>
+        <div class="stat-label">Available</div>
+      </div>
+      <div class="stat-card stat-warn">
+        <div class="stat-num" id="stat-onbreak">—</div>
+        <div class="stat-label">On break</div>
+      </div>
+      <div class="stat-card stat-danger">
+        <div class="stat-num" id="stat-overdue">—</div>
+        <div class="stat-label">Overdue</div>
+      </div>
+      <div class="stat-card stat-info">
+        <div class="stat-num" id="stat-upcoming">—</div>
+        <div class="stat-label">Up next</div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <nav class="tabs">
+      <button class="tab active" id="tab-board" onclick="switchTab('board')">Board</button>
+      <button class="tab" id="tab-coverage" onclick="switchTab('coverage')">Coverage</button>
+      <button class="tab" id="tab-upload" onclick="switchTab('upload')">Upload</button>
+      <button class="tab" id="tab-alerts" onclick="switchTab('alerts')">
+        Alerts
+        <span class="tab-badge hidden" id="alert-count">0</span>
+      </button>
+    </nav>
+
+    <!-- BOARD VIEW -->
+    <section class="view active" id="view-board">
+      <div class="zone-group" id="zone-checklanes-group">
+        <div class="zone-header">
+          <span class="zone-name">Checklanes</span>
+          <span class="zone-pill" id="pill-checklanes"></span>
+        </div>
+        <div class="person-list" id="list-checklanes"></div>
+      </div>
+      <div class="zone-group" id="zone-sco-group">
+        <div class="zone-header">
+          <span class="zone-name">SCO</span>
+          <span class="zone-pill" id="pill-sco"></span>
+        </div>
+        <div class="person-list" id="list-sco"></div>
+      </div>
+      <div class="zone-group" id="zone-service-group">
+        <div class="zone-header">
+          <span class="zone-name">Service Desk</span>
+          <span class="zone-pill" id="pill-service"></span>
+        </div>
+        <div class="person-list" id="list-service"></div>
+      </div>
+      <div class="zone-group" id="zone-driveup-group">
+        <div class="zone-header">
+          <span class="zone-name">Drive Up</span>
+          <span class="zone-pill" id="pill-driveup"></span>
+        </div>
+        <div class="person-list" id="list-driveup"></div>
+      </div>
+      <div class="empty-state hidden" id="board-empty">
+        <div class="empty-icon">📋</div>
+        <div class="empty-title">No team members yet</div>
+        <div class="empty-sub">Upload your paper schedule or add people manually in the Upload tab.</div>
+        <button class="btn-primary" onclick="switchTab('upload')">Upload schedule →</button>
+      </div>
+    </section>
+
+    <!-- COVERAGE VIEW -->
+    <section class="view" id="view-coverage">
+      <div class="cov-section">
+        <div class="cov-header">
+          <span class="cov-title">Total on break</span>
+          <span class="cov-badge" id="cov-total-badge">0 / 0</span>
+        </div>
+        <div class="bar-track">
+          <div class="bar-fill" id="cov-bar"></div>
+        </div>
+        <div class="bar-labels">
+          <span>0%</span>
+          <span id="cov-pct-label">0% — ok</span>
+          <span>100%</span>
+        </div>
+      </div>
+
+      <div class="cov-section">
+        <div class="cov-section-label">Zone breakdown</div>
+        <div class="zone-grid">
+          <div class="zone-tile" id="ztile-checklanes">
+            <div class="zone-tile-name">Checklanes</div>
+            <div class="zone-tile-count" id="zcnt-checklanes">0</div>
+            <div class="zone-tile-max">max 2 at once</div>
+          </div>
+          <div class="zone-tile" id="ztile-sco">
+            <div class="zone-tile-name">SCO</div>
+            <div class="zone-tile-count" id="zcnt-sco">0</div>
+            <div class="zone-tile-max">max 2 at once</div>
+          </div>
+          <div class="zone-tile" id="ztile-service">
+            <div class="zone-tile-name">Service Desk</div>
+            <div class="zone-tile-count" id="zcnt-service">0</div>
+            <div class="zone-tile-max">max 1 at once</div>
+          </div>
+          <div class="zone-tile" id="ztile-driveup">
+            <div class="zone-tile-name">Drive Up</div>
+            <div class="zone-tile-count" id="zcnt-driveup">0</div>
+            <div class="zone-tile-max">max 1 at once</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cov-section">
+        <div class="cov-section-label">Up next (next 20 min)</div>
+        <div id="upcoming-list">
+          <div class="empty-small">No upcoming breaks scheduled in the next 20 minutes.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- UPLOAD VIEW -->
+    <section class="view" id="view-upload">
+      <div class="upload-section">
+        <div class="upload-box" id="upload-box" onclick="document.getElementById('file-input').click()">
+          <input type="file" id="file-input" accept="image/*" style="display:none" onchange="handleFileUpload(this)">
+          <div class="upload-icon-wrap">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+              <circle cx="12" cy="13" r="4"/>
+            </svg>
+          </div>
+          <div class="upload-title">Scan your paper schedule</div>
+          <div class="upload-sub">Take a photo or upload an image of your break sheet — Claude reads the names, times, and zones automatically</div>
+        </div>
+
+        <!-- Scanning state -->
+        <div class="scan-state hidden" id="scan-loading">
+          <div class="scan-spinner"></div>
+          <div class="scan-text">Reading your schedule...</div>
+        </div>
+
+        <!-- Parsed results -->
+        <div class="parsed-section hidden" id="parsed-section">
+          <div class="parsed-header">
+            <span class="parsed-title">Detected from schedule</span>
+            <span class="parsed-count" id="parsed-count"></span>
+          </div>
+          <div class="parsed-list" id="parsed-list"></div>
+          <div class="parsed-actions">
+            <button class="btn-primary" onclick="importSchedule()">Import all into board</button>
+            <button class="btn-secondary" onclick="resetUpload()">Scan again</button>
+          </div>
+        </div>
+
+        <!-- Import success -->
+        <div class="import-success hidden" id="import-success">
+          <div class="success-icon">✓</div>
+          <div class="success-title">Schedule imported</div>
+          <div class="success-sub">All breaks and lunches are now live on the board.</div>
+          <button class="btn-primary" onclick="switchTab('board')">Go to board →</button>
+        </div>
+      </div>
+
+      <!-- Manual add -->
+      <div class="manual-section">
+        <div class="manual-header">Or add manually</div>
+        <div class="manual-form">
+          <input type="text" id="manual-name" placeholder="Team member name" class="form-input">
+          <div class="form-row">
+            <input type="time" id="manual-time" class="form-input">
+            <select id="manual-type" class="form-select">
+              <option value="break">15-min break</option>
+              <option value="lunch">30-min lunch</option>
+              <option value="lunch60">60-min lunch</option>
+            </select>
+          </div>
+          <select id="manual-zone" class="form-select">
+            <option value="checklanes">Checklanes</option>
+            <option value="sco">SCO</option>
+            <option value="service">Service Desk</option>
+            <option value="driveup">Drive Up</option>
+          </select>
+          <button class="btn-primary" onclick="addManual()">Add to schedule</button>
+        </div>
+      </div>
+
+      <!-- Reset shift -->
+      <div class="danger-section">
+        <button class="btn-danger" onclick="confirmReset()">Clear all — start new shift</button>
+      </div>
+    </section>
+
+    <!-- ALERTS VIEW -->
+    <section class="view" id="view-alerts">
+      <div class="alerts-inner" id="alerts-inner">
+        <div class="empty-small" id="alerts-empty">No active alerts. All good!</div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- Toast notification -->
+  <div class="toast hidden" id="toast"></div>
+
+  <!-- Person detail modal -->
+  <div class="modal-overlay hidden" id="modal-overlay" onclick="closeModal()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <div class="modal-avatar" id="modal-avatar"></div>
+        <div>
+          <div class="modal-name" id="modal-name"></div>
+          <div class="modal-sub" id="modal-sub"></div>
+        </div>
+        <button class="modal-close" onclick="closeModal()">×</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
