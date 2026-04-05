@@ -210,24 +210,37 @@
       <!-- Manual add -->
       <div class="manual-section">
         <div class="manual-header">Or add manually</div>
-        <div class="manual-form">
-          <input type="text" id="manual-name" placeholder="Team member name" class="form-input">
-          <div class="form-row">
-            <input type="time" id="manual-time" class="form-input">
-            <select id="manual-type" class="form-select">
-              <option value="break">15-min break</option>
-              <option value="lunch">30-min lunch</option>
-              <option value="lunch60">60-min lunch</option>
-            </select>
+          <div class="manual-form">
+            <input type="text" id="manual-name" placeholder="Team member name" class="form-input">
+            <div style="font-size:13px;color:var(--gray-400);margin-bottom:8px">You can enter a full shift (start/end) and optional break times. Leave break fields empty to auto-assign based on shift length.</div>
+            <div class="form-row">
+              <input type="time" id="manual-shift-start" class="form-input" placeholder="Shift start">
+              <input type="time" id="manual-shift-end" class="form-input" placeholder="Shift end">
+            </div>
+            <div class="form-row">
+              <input type="time" id="manual-first-break" class="form-input" placeholder="1st break">
+              <input type="time" id="manual-lunch" class="form-input" placeholder="Lunch">
+            </div>
+            <div class="form-row">
+              <input type="time" id="manual-second-break" class="form-input" placeholder="2nd break">
+              <select id="manual-lunch-duration" class="form-select">
+                <option value="30">30-min lunch</option>
+                <option value="60">60-min lunch</option>
+              </select>
+            </div>
+            <div style="margin-top:6px">
+              <select id="manual-zone" class="form-select">
+                <option value="checklanes">Checklanes</option>
+                <option value="sco">SCO</option>
+                <option value="service">Service Desk</option>
+                <option value="driveup">Drive Up</option>
+              </select>
+            </div>
+            <div style="margin-top:10px; display:flex; gap:8px;">
+              <button class="btn-primary" onclick="addManual()">Add full shift</button>
+              <button class="btn-secondary" onclick="resetManualForm()">Clear</button>
+            </div>
           </div>
-          <select id="manual-zone" class="form-select">
-            <option value="checklanes">Checklanes</option>
-            <option value="sco">SCO</option>
-            <option value="service">Service Desk</option>
-            <option value="driveup">Drive Up</option>
-          </select>
-          <button class="btn-primary" onclick="addManual()">Add to schedule</button>
-        </div>
       </div>
 
       <!-- Reset shift -->

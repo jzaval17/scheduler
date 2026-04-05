@@ -302,12 +302,14 @@ function openModal(personId) {
   const elapsed = getElapsedMin(p);
   const dur = getDur(p);
   const remaining = dur - elapsed;
+  const shiftText = (p.shiftStartMs || p.shiftEndMs) ? `${fmtTime(p.shiftStartMs)} — ${fmtTime(p.shiftEndMs)}` : '—';
   let actionsHtml = p.status === 'available'
     ? `<div class="modal-action-row"><button class="modal-btn start-break" onclick="startBreak('${p.id}','break');closeModal()">Start 15-min break</button><button class="modal-btn start-lunch" onclick="startBreak('${p.id}','lunch');closeModal()">Start 30-min lunch</button></div><div class="modal-action-row"><button class="modal-btn start-lunch" onclick="startBreak('${p.id}','lunch60');closeModal()">Start 60-min lunch</button><button class="modal-btn remove" onclick="removePerson('${p.id}');closeModal()">Remove</button></div>`
     : `<div class="modal-action-row"><button class="modal-btn mark-back" onclick="markReturned('${p.id}');closeModal()">Mark returned</button><button class="modal-btn remove" onclick="removePerson('${p.id}');closeModal()">Remove</button></div>`;
   body.innerHTML = `${actionsHtml}
     <div class="modal-info-row"><span class="modal-info-label">Status</span><span class="modal-info-value">${p.status.charAt(0).toUpperCase()+p.status.slice(1)}</span></div>
     <div class="modal-info-row"><span class="modal-info-label">Zone</span><span class="modal-info-value">${ZONE_LABELS[p.zone]}</span></div>
+    <div class="modal-info-row"><span class="modal-info-label">Shift</span><span class="modal-info-value">${shiftText}</span></div>
     <div class="modal-info-row"><span class="modal-info-label">Next break</span><span class="modal-info-value">${p.scheduledTime||'—'}</span></div>
     <div class="modal-info-row"><span class="modal-info-label">Break started</span><span class="modal-info-value">${p.startMs?fmtTime(p.startMs):'—'}</span></div>
     <div class="modal-info-row"><span class="modal-info-label">Time remaining</span><span class="modal-info-value">${isActive(p)?(remaining>0?remaining+' min':'Overdue by '+Math.abs(remaining)+' min'):'—'}</span></div>`;
@@ -343,21 +345,72 @@ function removePerson(personId) {
 function addManual() {
   const name = document.getElementById('manual-name')?.value.trim();
   if (!name) { showToast('Please enter a name'); return; }
-  const timeVal = document.getElementById('manual-time')?.value;
-  const type = document.getElementById('manual-type')?.value || 'break';
+
+  const shiftStart = document.getElementById('manual-shift-start')?.value;
+  const shiftEnd = document.getElementById('manual-shift-end')?.value;
+  const firstBreak = document.getElementById('manual-first-break')?.value;
+  const lunch = document.getElementById('manual-lunch')?.value;
+  const secondBreak = document.getElementById('manual-second-break')?.value;
+  const lunchDur = parseInt(document.getElementById('manual-lunch-duration')?.value || '30', 10);
   const zone = document.getElementById('manual-zone')?.value || 'checklanes';
-  let scheduledTime = '', scheduledMs = null;
-  if (timeVal) {
-    const [h, m] = timeVal.split(':').map(Number);
-    const d = new Date(); d.setHours(h, m, 0, 0);
-    scheduledMs = d.getTime();
-    scheduledTime = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+  const timeToDate = (t) => {
+    if (!t) return null;
+    const [h, m] = t.split(':').map(Number);
+    const d = new Date(); d.setHours(h, m, 0, 0); d.setSeconds(0); d.setMilliseconds(0);
+    return d;
+  };
+
+  const sStart = timeToDate(shiftStart);
+  const sEnd = timeToDate(shiftEnd);
+  const breaks = [];
+
+  if (firstBreak) breaks.push({ type: 'break', date: timeToDate(firstBreak), dur: 15 });
+  if (lunch) breaks.push({ type: lunchDur === 60 ? 'lunch60' : 'lunch', date: timeToDate(lunch), dur: lunchDur });
+  if (secondBreak) breaks.push({ type: 'break', date: timeToDate(secondBreak), dur: 15 });
+
+  if ((!firstBreak && !lunch && !secondBreak) && sStart && sEnd) {
+    const durHours = (sEnd.getTime() - sStart.getTime()) / 3600000;
+    if (durHours >= 2) {
+      const b = new Date(sStart.getTime() + 2 * 3600000);
+      if (b < sEnd) breaks.push({ type: 'break', date: b, dur: 15 });
+    }
+    if (durHours > 5) {
+      const mid = new Date((sStart.getTime() + sEnd.getTime()) / 2);
+      breaks.push({ type: lunchDur === 60 ? 'lunch60' : 'lunch', date: mid, dur: lunchDur });
+    }
+    if (durHours > 6) {
+      const b2 = new Date(sStart.getTime() + 6 * 3600000);
+      if (b2 < sEnd) breaks.push({ type: 'break', date: b2, dur: 15 });
+    }
   }
-  people.push({ id: uid(), name, zone, type, status: 'available', startMs: null, scheduledTime, scheduledMs });
+
+  if (breaks.length === 0 && !sStart && !sEnd) {
+    showToast('No break times or shift provided — enter a time or shift start/end');
+    return;
+  }
+
+  let created = 0;
+  breaks.forEach(b => {
+    if (!b.date) return;
+    const scheduledMs = b.date.getTime();
+    const scheduledTime = b.date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    people.push({ id: uid(), name, zone, type: b.type, role: '', status: 'available', startMs: null, scheduledTime, scheduledMs, shiftStartMs: sStart ? sStart.getTime() : null, shiftEndMs: sEnd ? sEnd.getTime() : null });
+    created++;
+  });
+
+  if (created === 0) { showToast('No valid break times to add'); return; }
+
   saveState();
-  if (document.getElementById('manual-name')) document.getElementById('manual-name').value = '';
-  showToast(`${name} added to ${ZONE_LABELS[zone]}`);
+  resetManualForm();
+  showToast(`${name} — ${created} break${created>1?'s':''} added to ${ZONE_LABELS[zone]}`);
   switchTab('board');
+}
+
+function resetManualForm() {
+  ['manual-name','manual-shift-start','manual-shift-end','manual-first-break','manual-lunch','manual-second-break'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  const dur = document.getElementById('manual-lunch-duration'); if (dur) dur.value = '30';
+  const zone = document.getElementById('manual-zone'); if (zone) zone.value = 'checklanes';
 }
 
 function confirmReset() {
