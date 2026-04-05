@@ -339,14 +339,18 @@ function renderBoard() {
           avClass = 'av-lunch'; sbClass = 'sb-lunch'; sbLabel = `${dur}-min lunch`; timerText = remaining > 0 ? `${remaining} min left` : 'time up';
         }
       }
+      else if (p.status === 'clocked_out') {
+        // show clocked out in the small status badge
+        sbClass = 'sb-upcoming';
+        sbLabel = 'Clocked out';
+      }
 
       // removed taken checkmark -- using compact break dots instead
       const takenHtml = '';
       const lateHtml = p.late ? '<span class="person-flag late">Late</span>' : '';
       const absentHtml = p.absent ? '<span class="person-flag absent">Absent</span>' : '';
       let clockOutHtml = '';
-      if (p.clockedOut) clockOutHtml = '<span class="person-flag absent">Clocked out</span>';
-      else if (p.clockOutOverdue) clockOutHtml = '<span class="person-flag absent">Overtime</span>';
+      if (p.clockOutOverdue) clockOutHtml = '<span class="person-flag absent">Overtime</span>';
       else if (p.shouldClockOut) clockOutHtml = '<span class="person-flag late">Clock out</span>';
       // Availability sign: always show, with color variant based on current status
       let availClass = 'avail-available';
@@ -1299,11 +1303,41 @@ function checkPushNotifications() {
         sendPushNotification('Shift ended — clock out', `${p.name} still on break after shift end — ${ZONE_LABELS[p.zone]}`);
       }
     }
+    // scheduled breaks/lunches that are due now (scheduledMs <= now and still 'scheduled')
+    if (p.breaks && p.breaks.length > 0) {
+      const now = Date.now();
+      p.breaks.forEach(b => {
+        if (b.status === 'scheduled' && b.scheduledMs && b.scheduledMs <= now) {
+          const key = 'due:' + b.id;
+          if (!notifiedPush.has(key) && Notification.permission === 'granted') {
+            notifiedPush.add(key);
+            const title = b.type === 'lunch' ? 'Lunch due' : 'Break due';
+            sendPushNotification(title, `${p.name}'s ${b.type} is due — ${ZONE_LABELS[p.zone]}`);
+            pushAlert({ id: key, type: 'info', msg: `${p.name}'s ${b.type} is due — ${ZONE_LABELS[p.zone]}`, personId: p.id });
+          }
+        }
+      });
+    }
   });
 
   // Cleanup notifiedPush entries when condition clears or person removed
   notifiedPush.forEach(key => {
     const [type, id] = key.split(':');
+    if (type === 'due') {
+      // id is break id; find the person that has this break
+      let found = false;
+      for (const p of people) {
+        const b = (p.breaks || []).find(x => x.id === id);
+        if (b) {
+          found = true;
+          if (b.status !== 'scheduled' || !(b.scheduledMs && b.scheduledMs <= Date.now())) notifiedPush.delete(key);
+          break;
+        }
+      }
+      if (!found) notifiedPush.delete(key);
+      return;
+    }
+    // for other types, id is person id
     const p = people.find(x => x.id === id);
     if (!p) { notifiedPush.delete(key); return; }
     if (type === 'overdue' && p.status !== 'overdue') notifiedPush.delete(key);
