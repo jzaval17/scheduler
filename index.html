@@ -191,6 +191,14 @@
             <span class="parsed-title">Detected from schedule</span>
             <span class="parsed-count" id="parsed-count"></span>
           </div>
+          <div class="parsed-assign-warning hidden" id="parsed-assign-warning">
+            <div style="padding:12px 14px; border-bottom:1px solid var(--gray-100); background: #FFF8E6; color: var(--amber); font-weight:600;">Auto-assigned roles (no tasks detected)</div>
+            <div style="padding:10px 14px; font-size:13px; color:var(--gray-800);" id="parsed-assign-list"></div>
+            <div style="padding:10px 14px; border-top:1px solid var(--gray-100); display:flex; gap:8px;">
+              <button class="btn-primary" onclick="importSchedule()">Import all into board</button>
+              <button class="btn-secondary" onclick="resetUpload()">Scan again / Cancel</button>
+            </div>
+          </div>
           <div class="parsed-list" id="parsed-list"></div>
           <div class="parsed-actions">
             <button class="btn-primary" onclick="importSchedule()">Import all into board</button>

@@ -43,6 +43,19 @@ function getDur(p) {
   return BREAK_DUR[p.type] || 15;
 }
 
+// Infer a default role/assignment when tasks/role are not provided.
+function inferRole(zone, tasks) {
+  if (tasks && tasks.length) return tasks;
+  switch (zone) {
+    case 'sco': return 'SCO / Self-Checkout';
+    case 'service': return 'Guest Service / Service Desk';
+    case 'driveup': return 'Drive Up / Fulfillment';
+    case 'checklanes':
+    default:
+      return 'Front End / Cashier';
+  }
+}
+
 function fmtTime(ms) {
   if (!ms) return '—';
   const d = new Date(ms);
@@ -586,7 +599,30 @@ function showParsedResults(parsed) {
   if (countEl) countEl.textContent = `${parsed.length} people found`;
 
   // Store for import
+  // Attach inferred roles for rows that lack `tasks` or `role`.
+  parsed.forEach(row => {
+    // Normalize zone to default if missing
+    row.zone = row.zone || 'checklanes';
+    if (!row.tasks && !row.role) {
+      row.assignedRole = inferRole(row.zone, row.tasks || '');
+    } else {
+      row.assignedRole = row.role || (row.tasks ? row.tasks : '');
+    }
+  });
   window._parsedSchedule = parsed;
+
+  // Build assignment warning list
+  const assignListEl = document.getElementById('parsed-assign-list');
+  const assignWarningEl = document.getElementById('parsed-assign-warning');
+  const autoAssigned = parsed.filter(r => r.assignedRole && (!r.role && !r.tasks));
+  if (assignListEl) {
+    if (autoAssigned.length === 0) {
+      assignWarningEl?.classList.add('hidden');
+    } else {
+      assignWarningEl?.classList.remove('hidden');
+      assignListEl.innerHTML = autoAssigned.map(r => `<div style="padding:6px 0; border-bottom:1px solid var(--gray-100)"><strong>${r.name}</strong> → ${r.assignedRole}</div>`).join('');
+    }
+  }
 
   parsed.forEach(row => {
     const div = document.createElement('div');
@@ -624,11 +660,14 @@ function importSchedule() {
       }
     }
     const zone = row.zone || 'checklanes';
+    // Use assignedRole (inferred) if present, otherwise any provided role/tasks
+    const role = row.assignedRole || row.role || (row.tasks ? row.tasks : '');
     people.push({
       id: uid(),
       name: row.name,
       zone,
       type: row.type || 'break',
+      role: role,
       status: 'available',
       startMs: null,
       scheduledTime,
