@@ -1416,6 +1416,17 @@ function checkPushNotifications() {
   }
 }
 
+// Manual refresh triggered by user
+function manualRefresh() {
+  try { document.getElementById('refresh-btn')?.classList.add('pulse'); } catch(e){}
+  showToast('Refreshing...');
+  loadState();
+  render();
+  // run an immediate tick and notification check to update UI quickly
+  try { tick(); checkPushNotifications(); } catch(e){}
+  setTimeout(() => { try { document.getElementById('refresh-btn')?.classList.remove('pulse'); } catch(e){} }, 800);
+}
+
 // ── Init ──────────────────────────────────────────────────────────────
 loadState();
 requestNotificationPermission();
