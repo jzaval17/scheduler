@@ -329,23 +329,20 @@ function renderBoard() {
       const paid = computePaidHours(p);
       const paidHtml = (paid !== null && paid !== undefined) ? `<div class="person-shift">${shiftLine} · ${paid} hrs</div>` : (shiftLine ? `<div class="person-shift">${shiftLine}</div>` : '');
 
-      // Build per-break badges (1st break, lunch, 2nd break) showing status
+      // Build compact per-break indicators (small dots) to reduce visual clutter
       let breakBadges = '';
       if (p.breaks && p.breaks.length > 0) {
         const sorted = [...p.breaks].slice().sort((a, b) => (a.scheduledMs || 0) - (b.scheduledMs || 0));
-        let breakIdx = 0;
-        const badges = sorted.map(b => {
-          let label = b.type === 'lunch' ? 'Lunch' : (breakIdx === 0 ? '1st' : '2nd');
-          if (b.type !== 'lunch') breakIdx++;
+        const dots = sorted.map(b => {
           let cls = 'br-sched';
-          let content = label;
-          if (b.status === 'done') { cls = 'br-done'; content = '✓'; }
-          else if (b.status === 'active') { cls = 'br-active'; content = 'In'; }
-          else if (b.status === 'overdue') { cls = 'br-overdue'; content = '!'; }
+          if (b.status === 'done') cls = 'br-done';
+          else if (b.status === 'active') cls = 'br-active';
+          else if (b.status === 'overdue') cls = 'br-overdue';
+          const label = b.type === 'lunch' ? 'Lunch' : '';
           const title = `${label} ${b.scheduledTime || ''}`.trim();
-          return `<span class="break-badge ${cls}" title="${escapeHtml(title)}">${content}</span>`;
+          return `<span class="break-dot ${cls}" title="${escapeHtml(title)}"></span>`;
         }).join('');
-        breakBadges = `<div class="break-badges">${badges}</div>`;
+        breakBadges = `<div class="break-dots" aria-hidden="true">${dots}</div>`;
       }
 
       const card = document.createElement('div');
