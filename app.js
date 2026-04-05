@@ -17,7 +17,35 @@ function loadState() {
   try {
     const saved = localStorage.getItem('bm_people');
     if (saved) people = JSON.parse(saved);
-    people.forEach(p => { if (p.startMs) p.startMs = Number(p.startMs); });
+    // Migrate older flat-break entries (no `breaks`) into new person -> breaks model
+    if (people.length > 0 && !people[0].breaks) {
+      const map = new Map();
+      people.forEach(old => {
+        const name = (old.name || '').trim();
+        const zone = old.zone || 'checklanes';
+        if (!name) return;
+        const key = name + '||' + zone;
+        if (!map.has(key)) map.set(key, { id: uid(), name, zone, role: old.role || '', breaks: [] });
+        const person = map.get(key);
+        const b = {
+          id: uid(),
+          type: old.type || 'break',
+          scheduledMs: old.scheduledMs || null,
+          scheduledTime: old.scheduledTime || (old.scheduledMs ? fmtTime(old.scheduledMs) : ''),
+          status: (old.startMs ? 'active' : (old.status === 'overdue' ? 'overdue' : 'scheduled')),
+          startMs: old.startMs ? Number(old.startMs) : null,
+          dur: BREAK_DUR[old.type] || 15
+        };
+        person.breaks.push(b);
+      });
+      people = Array.from(map.values());
+    }
+    // Normalize numeric startMs and sync statuses
+    people.forEach(p => {
+      if (p.startMs) p.startMs = Number(p.startMs);
+      if (p.breaks) p.breaks.forEach(b => { if (b.startMs) b.startMs = Number(b.startMs); });
+      syncPersonStatus(p);
+    });
   } catch(e) { people = []; }
 }
 
@@ -41,6 +69,31 @@ function fmtTime(ms) {
   return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 function uid() { return Date.now() + Math.random().toString(36).slice(2, 7); }
+
+// Helpers for new data model: people have `breaks` array. Each break: { id, type, scheduledMs, scheduledTime, status: 'scheduled'|'active'|'overdue'|'done', startMs, dur }
+function syncPersonStatus(person) {
+  if (!person || !person.breaks) return;
+  const active = person.breaks.find(b => b.status === 'active' || b.status === 'overdue');
+  if (active) {
+    person.status = active.status === 'overdue' ? 'overdue' : (active.type === 'break' ? 'break' : 'lunch');
+    person.type = active.type;
+    person.startMs = active.startMs || null;
+  } else {
+    person.status = 'available';
+    person.type = null;
+    person.startMs = null;
+  }
+}
+
+function getNextScheduledBreak(person) {
+  if (!person || !person.breaks) return null;
+  const now = Date.now();
+  const scheduled = person.breaks.filter(b => b.status === 'scheduled' && b.scheduledMs && b.scheduledMs > now);
+  if (scheduled.length === 0) return null;
+  scheduled.sort((a, b) => a.scheduledMs - b.scheduledMs);
+  return scheduled[0];
+}
+
 
 // ── Parse military / short time strings ─────────────────────────────
 function parseMilTime(raw) {
@@ -106,13 +159,20 @@ function updateClock() {
 // ── Tick ─────────────────────────────────────────────────────────────
 function tick() {
   let changed = false;
+  const now = Date.now();
   people.forEach(p => {
-    if ((p.status === 'break' || p.status === 'lunch') && p.startMs) {
-      if (getElapsedMin(p) >= getDur(p)) {
-        p.status = 'overdue'; changed = true;
-        pushAlert({ type: 'urgent', msg: `${p.name} is overdue from ${p.type} — ${ZONE_LABELS[p.zone]}`, personId: p.id });
+    if (!p.breaks) return;
+    p.breaks.forEach(b => {
+      if (b.status === 'active' && b.startMs) {
+        const elapsed = Math.floor((now - b.startMs) / 60000);
+        const dur = b.dur || (b.type === 'break' ? 15 : 30);
+        if (elapsed >= dur) {
+          b.status = 'overdue'; changed = true;
+          pushAlert({ type: 'urgent', msg: `${p.name} is overdue from ${b.type} — ${ZONE_LABELS[p.zone]}`, personId: p.id });
+        }
       }
-    }
+    });
+    syncPersonStatus(p);
   });
   if (changed) saveState();
   render();
@@ -151,15 +211,24 @@ function renderBoard() {
 
     const order = { overdue: 0, break: 1, lunch: 2, available: 3 };
     [...zp].sort((a, b) => (order[a.status] ?? 3) - (order[b.status] ?? 3)).forEach(p => {
-      const elapsed = getElapsedMin(p);
-      const dur = getDur(p);
-      const remaining = dur - elapsed;
+      // Determine active break or next scheduled
+      const activeBreak = p.breaks ? p.breaks.find(b => b.status === 'active' || b.status === 'overdue') : null;
+      const next = getNextScheduledBreak(p);
       let avClass = 'av-available', sbClass = 'sb-available', sbLabel = 'Available';
-      let timerText = p.scheduledTime ? `Next break: ${p.scheduledTime}` : '';
+      let timerText = next ? `Next: ${next.scheduledTime || ''}` : '';
 
-      if (p.status === 'break') { avClass = 'av-break'; sbClass = 'sb-break'; sbLabel = '15-min break'; timerText = remaining > 0 ? `${remaining} min left` : 'time up'; }
-      else if (p.status === 'lunch') { avClass = 'av-lunch'; sbClass = 'sb-lunch'; sbLabel = `${dur}-min lunch`; timerText = remaining > 0 ? `${remaining} min left` : 'time up'; }
-      else if (p.status === 'overdue') { avClass = 'av-overdue'; sbClass = 'sb-overdue'; sbLabel = 'Overdue!'; timerText = `+${Math.abs(remaining)} min overdue`; }
+      if (activeBreak) {
+        const elapsed = activeBreak.startMs ? Math.floor((Date.now() - activeBreak.startMs) / 60000) : 0;
+        const dur = activeBreak.dur || (activeBreak.type === 'break' ? 15 : 30);
+        const remaining = dur - elapsed;
+        if (activeBreak.status === 'overdue') {
+          avClass = 'av-overdue'; sbClass = 'sb-overdue'; sbLabel = 'Overdue!'; timerText = `+${Math.abs(remaining)} min overdue`;
+        } else if (activeBreak.type === 'break') {
+          avClass = 'av-break'; sbClass = 'sb-break'; sbLabel = '15-min break'; timerText = remaining > 0 ? `${remaining} min left` : 'time up';
+        } else {
+          avClass = 'av-lunch'; sbClass = 'sb-lunch'; sbLabel = `${dur}-min lunch`; timerText = remaining > 0 ? `${remaining} min left` : 'time up';
+        }
+      }
 
       const card = document.createElement('div');
       card.className = 'person-card' + (p.status === 'overdue' ? ' overdue' : '');
@@ -173,10 +242,15 @@ function renderBoard() {
 function renderStats() {
   let avail = 0, onBreak = 0, overdue = 0, upcoming = 0;
   const now = Date.now();
+  const soon = 20 * 60000;
   people.forEach(p => {
     if (p.status === 'overdue') overdue++;
     else if (p.status === 'break' || p.status === 'lunch') onBreak++;
-    else { avail++; if (p.scheduledMs && (p.scheduledMs - now) < 20*60000 && (p.scheduledMs - now) > 0) upcoming++; }
+    else {
+      avail++;
+      const next = getNextScheduledBreak(p);
+      if (next && (next.scheduledMs - now) < soon && (next.scheduledMs - now) > 0) upcoming++;
+    }
   });
   const s = id => document.getElementById(id);
   if (s('stat-available')) s('stat-available').textContent = avail;
