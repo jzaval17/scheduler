@@ -1,7 +1,7 @@
 // ── State ──────────────────────────────────────────────────────────
 const ZONE_MAX = { checklanes: 2, sco: 2, service: 1, driveup: 1 };
 const ZONE_LABELS = { checklanes: 'Checklanes', sco: 'SCO', service: 'Service Desk', driveup: 'Drive Up' };
-const BREAK_DUR = { break: 15, lunch: 30, lunch60: 60 };
+const BREAK_DUR = { break: 15, lunch: 45, lunch60: 60 };
 
 // The Anthropic API key is no longer stored in the client. Requests
 // are proxied to a server-side function at `/api/anthropic` which reads
@@ -92,6 +92,50 @@ function getNextScheduledBreak(person) {
   if (scheduled.length === 0) return null;
   scheduled.sort((a, b) => a.scheduledMs - b.scheduledMs);
   return scheduled[0];
+}
+
+// Mark the next active/overdue or due scheduled break as done for a person
+function markBreakDone(personId) {
+  const p = people.find(x => x.id === personId);
+  if (!p) return;
+  const now = Date.now();
+  if (p.breaks && p.breaks.length > 0) {
+    // Prefer active or overdue
+    let target = p.breaks.find(b => b.status === 'active' || b.status === 'overdue');
+    if (!target) {
+      // Find the next scheduled that is due
+      const due = p.breaks.filter(b => b.status === 'scheduled' && b.scheduledMs && b.scheduledMs <= now);
+      if (due.length > 0) {
+        due.sort((a, b) => b.scheduledMs - a.scheduledMs); // most recent due
+        target = due[0];
+      }
+    }
+    if (target) {
+      target.status = 'done';
+      // record startMs if not present
+      if (!target.startMs && target.scheduledMs) target.startMs = target.scheduledMs;
+      syncPersonStatus(p);
+      saveState();
+      showToast(`${p.name} — ${target.type} marked taken`);
+      render();
+    }
+  }
+}
+
+// Compute paid hours for a shift excluding lunches (in hours, 1 decimal)
+function computePaidHours(person) {
+  if (!person || !person.shiftStartMs || !person.shiftEndMs) return null;
+  const totalMs = Math.max(0, person.shiftEndMs - person.shiftStartMs);
+  let lunchMs = 0;
+  if (person.breaks && person.breaks.length > 0) {
+    person.breaks.forEach(b => { if (b.type === 'lunch') lunchMs += (b.dur || BREAK_DUR['lunch']) * 60000; });
+  } else {
+    // fallback: if person.type is lunch and dur around
+    if (person.type === 'lunch') lunchMs = (person.dur || BREAK_DUR['lunch']) * 60000;
+  }
+  const paidMs = Math.max(0, totalMs - lunchMs);
+  const hours = Math.round((paidMs / 3600000) * 10) / 10;
+  return hours;
 }
 
 
@@ -230,9 +274,15 @@ function renderBoard() {
         }
       }
 
+      const taken = p.breaks && p.breaks.some(b => b.status === 'done');
+      const takenHtml = taken ? '<span class="taken-badge">✓</span>' : '';
+      const shiftLine = (p.shiftStartMs && p.shiftEndMs) ? `${fmtTime(p.shiftStartMs)} — ${fmtTime(p.shiftEndMs)}` : '';
+      const paid = computePaidHours(p);
+      const paidHtml = (paid !== null && paid !== undefined) ? `<div class="person-shift">${shiftLine} · ${paid} hrs</div>` : (shiftLine ? `<div class="person-shift">${shiftLine}</div>` : '');
+
       const card = document.createElement('div');
       card.className = 'person-card' + (p.status === 'overdue' ? ' overdue' : '');
-      card.innerHTML = `<div class="avatar ${avClass}">${initials(p.name)}</div><div class="person-info"><div class="person-name">${p.name}</div><div class="person-timer${p.status === 'overdue' ? ' overdue' : ''}">${timerText}</div></div><span class="status-badge ${sbClass}">${sbLabel}</span>`;
+      card.innerHTML = `<div class="avatar ${avClass}">${initials(p.name)}</div><div class="person-info"><div class="person-name">${p.name} ${takenHtml}</div>${paidHtml}<div class="person-timer${p.status === 'overdue' ? ' overdue' : ''}">${timerText}</div></div><span class="status-badge ${sbClass}">${sbLabel}</span>`;
       card.onclick = () => openModal(p.id);
       list.appendChild(card);
     });
@@ -283,15 +333,16 @@ function renderCoverage() {
   });
 
   const now = Date.now();
-  const upcoming = people.filter(p => p.status === 'available' && p.scheduledMs && (p.scheduledMs - now) < 20*60000 && (p.scheduledMs - now) > 0)
-    .sort((a, b) => a.scheduledMs - b.scheduledMs);
+  const upcoming = people.map(p => ({ p, next: getNextScheduledBreak(p) }))
+    .filter(x => x.p.status === 'available' && x.next && x.next.scheduledMs && (x.next.scheduledMs - now) < 20*60000 && (x.next.scheduledMs - now) > 0)
+    .sort((a, b) => a.next.scheduledMs - b.next.scheduledMs);
   const upEl = document.getElementById('upcoming-list');
   if (upEl) {
     upEl.innerHTML = upcoming.length === 0
       ? '<div class="empty-small">No upcoming breaks in the next 20 minutes.</div>'
-      : upcoming.map(p => {
-          const minsUntil = Math.round((p.scheduledMs - now) / 60000);
-          return `<div class="upcoming-card"><div class="avatar av-break">${initials(p.name)}</div><div class="person-info"><div class="person-name">${p.name}</div><div class="person-detail">${ZONE_LABELS[p.zone]} — ${p.type === 'break' ? '15-min break' : 'lunch'}</div></div><span class="status-badge sb-upcoming">in ${minsUntil}m</span></div>`;
+      : upcoming.map(x => {
+          const minsUntil = Math.round((x.next.scheduledMs - now) / 60000);
+          return `<div class="upcoming-card"><div class="avatar av-break">${initials(x.p.name)}</div><div class="person-info"><div class="person-name">${x.p.name}</div><div class="person-detail">${ZONE_LABELS[x.p.zone]} — ${x.next.type === 'break' ? `${BREAK_DUR['break']}-min break` : `${BREAK_DUR['lunch']}-min lunch`}</div></div><span class="status-badge sb-upcoming">in ${minsUntil}m</span></div>`;
         }).join('');
   }
 }
@@ -315,12 +366,14 @@ function renderAlerts() {
       actions: [{ label: 'View coverage', fn: "switchTab('coverage')" }] });
   });
   const now = Date.now();
-  people.filter(p => p.status === 'available' && p.scheduledMs && (p.scheduledMs - now) < 15*60000 && (p.scheduledMs - now) > 0)
-    .forEach(p => {
-      const m = Math.round((p.scheduledMs - now) / 60000);
+  people.forEach(p => {
+    const next = getNextScheduledBreak(p);
+    if (p.status === 'available' && next && next.scheduledMs && (next.scheduledMs - now) < 15*60000 && (next.scheduledMs - now) > 0) {
+      const m = Math.round((next.scheduledMs - now) / 60000);
       liveAlerts.push({ id: 'upcoming-' + p.id, type: 'info',
-        msg: `${p.name}'s ${p.type === 'break' ? 'break' : 'lunch'} is due in ${m} min — ${ZONE_LABELS[p.zone]} (${p.scheduledTime})` });
-    });
+        msg: `${p.name}'s ${next.type === 'break' ? 'break' : 'lunch'} is due in ${m} min — ${ZONE_LABELS[p.zone]} (${next.scheduledTime})` });
+    }
+  });
   liveAlerts.push(...alerts.filter(a => a.type === 'ok'));
 
   const urgentCount = liveAlerts.filter(a => a.type === 'urgent').length;
@@ -372,19 +425,30 @@ function openModal(personId) {
   av.className = 'modal-avatar ' + avClass;
   av.textContent = initials(p.name);
   nm.textContent = p.name;
-  sub.textContent = ZONE_LABELS[p.zone] + ' · ' + (p.type === 'break' ? '15-min break' : '30-min lunch');
+  sub.textContent = ZONE_LABELS[p.zone] + ' · ' + (p.type === 'break' ? `${BREAK_DUR['break']}-min break` : `${BREAK_DUR['lunch']}-min lunch`);
   const elapsed = getElapsedMin(p);
   const dur = getDur(p);
   const remaining = dur - elapsed;
   const shiftText = (p.shiftStartMs || p.shiftEndMs) ? `${fmtTime(p.shiftStartMs)} — ${fmtTime(p.shiftEndMs)}` : '—';
-  let actionsHtml = p.status === 'available'
-    ? `<div class="modal-action-row"><button class="modal-btn start-break" onclick="startBreak('${p.id}','break');closeModal()">Start 15-min break</button><button class="modal-btn start-lunch" onclick="startBreak('${p.id}','lunch');closeModal()">Start 30-min lunch</button></div><div class="modal-action-row"><button class="modal-btn remove" onclick="removePerson('${p.id}');closeModal()">Remove</button></div>`
-    : `<div class="modal-action-row"><button class="modal-btn mark-back" onclick="markReturned('${p.id}');closeModal()">Mark returned</button><button class="modal-btn remove" onclick="removePerson('${p.id}');closeModal()">Remove</button></div>`;
+  // Offer start buttons when available. Offer "Mark taken" when a break/lunch is active or due.
+  const now = Date.now();
+  const next = getNextScheduledBreak(p);
+  const hasDue = p.breaks && (p.breaks.find(b => b.status === 'active' || b.status === 'overdue') || (next && next.scheduledMs && next.scheduledMs <= now));
+  let actionsHtml = '';
+  if (p.status === 'available') {
+    actionsHtml += `<div class="modal-action-row"><button class="modal-btn start-break" onclick="startBreak('${p.id}','break');closeModal()">Start ${BREAK_DUR['break']}-min break</button><button class="modal-btn start-lunch" onclick="startBreak('${p.id}','lunch');closeModal()">Start ${BREAK_DUR['lunch']}-min lunch</button></div>`;
+  } else {
+    actionsHtml += `<div class="modal-action-row"><button class="modal-btn mark-back" onclick="markReturned('${p.id}');closeModal()">Mark returned</button></div>`;
+  }
+  if (hasDue) {
+    actionsHtml += `<div class="modal-action-row"><button class="modal-btn ok" onclick="markBreakDone('${p.id}');closeModal()">Mark break taken</button></div>`;
+  }
+  actionsHtml += `<div class="modal-action-row"><button class="modal-btn remove" onclick="removePerson('${p.id}');closeModal()">Remove</button></div>`;
   body.innerHTML = `${actionsHtml}
     <div class="modal-info-row"><span class="modal-info-label">Status</span><span class="modal-info-value">${p.status.charAt(0).toUpperCase()+p.status.slice(1)}</span></div>
     <div class="modal-info-row"><span class="modal-info-label">Zone</span><span class="modal-info-value">${ZONE_LABELS[p.zone]}</span></div>
     <div class="modal-info-row"><span class="modal-info-label">Shift</span><span class="modal-info-value">${shiftText}</span></div>
-    <div class="modal-info-row"><span class="modal-info-label">Next break</span><span class="modal-info-value">${p.scheduledTime||'—'}</span></div>
+    <div class="modal-info-row"><span class="modal-info-label">Next break</span><span class="modal-info-value">${(next && next.scheduledTime) ? next.scheduledTime : (p.scheduledTime||'—')}</span></div>
     <div class="modal-info-row"><span class="modal-info-label">Break started</span><span class="modal-info-value">${p.startMs?fmtTime(p.startMs):'—'}</span></div>
     <div class="modal-info-row"><span class="modal-info-label">Time remaining</span><span class="modal-info-value">${isActive(p)?(remaining>0?remaining+' min':'Overdue by '+Math.abs(remaining)+' min'):'—'}</span></div>`;
   overlay.classList.remove('hidden');
@@ -400,13 +464,18 @@ function startBreak(personId, type) {
   if (!p) return;
     p.status = type === 'lunch' ? 'lunch' : type;
   p.type = type; p.startMs = Date.now();
-    saveState(); showToast(`${p.name} — ${type==='break'?'15-min break':type==='lunch'?'30-min lunch':''} started`); render();
+    saveState(); showToast(`${p.name} — ${type==='break'?`${BREAK_DUR['break']}-min break`:type==='lunch'?`${BREAK_DUR['lunch']}-min lunch`:''} started`); render();
 }
 
 function markReturned(personId) {
   const p = people.find(x => x.id === personId);
   if (!p) return;
-  pushAlert({ type: 'ok', msg: `${p.name} returned from ${p.type}` });
+  // Mark any active/overdue break as done when returning
+  if (p.breaks && p.breaks.length > 0) {
+    const active = p.breaks.find(b => b.status === 'active' || b.status === 'overdue');
+    if (active) { active.status = 'done'; if (!active.startMs) active.startMs = active.scheduledMs || Date.now(); }
+  }
+  pushAlert({ type: 'ok', msg: `${p.name} returned` });
   p.status = 'available'; p.startMs = null;
   saveState(); showToast(`${p.name} marked as returned`); render();
 }
@@ -425,7 +494,7 @@ function addManual() {
   const firstBreak = document.getElementById('manual-first-break')?.value;
   const lunch = document.getElementById('manual-lunch')?.value;
   const secondBreak = document.getElementById('manual-second-break')?.value;
-  const lunchDurVal = document.getElementById('manual-lunch-duration')?.value || '30';
+  const lunchDurVal = document.getElementById('manual-lunch-duration')?.value || String(BREAK_DUR['lunch']);
   const zone = document.getElementById('manual-zone')?.value || 'checklanes';
 
   const timeToDate = (t) => {
@@ -440,22 +509,44 @@ function addManual() {
   const breaks = [];
 
   if (firstBreak) breaks.push({ type: 'break', date: timeToDate(firstBreak), dur: 15 });
-  if (lunch && lunchDurVal !== 'none') breaks.push({ type: 'lunch', date: timeToDate(lunch), dur: 30 });
+  if (lunch && lunchDurVal !== 'none') breaks.push({ type: 'lunch', date: timeToDate(lunch), dur: Number(lunchDurVal) });
   if (secondBreak) breaks.push({ type: 'break', date: timeToDate(secondBreak), dur: 15 });
 
+  // If no explicit times provided, auto-generate breaks based on shift length.
+  const durHours = (sStart && sEnd) ? ((sEnd.getTime() - sStart.getTime()) / 3600000) : 0;
   if ((!firstBreak && !lunch && !secondBreak) && sStart && sEnd) {
-    const durHours = (sEnd.getTime() - sStart.getTime()) / 3600000;
     if (durHours >= 2) {
       const b = new Date(sStart.getTime() + 2 * 3600000);
       if (b < sEnd) breaks.push({ type: 'break', date: b, dur: 15 });
     }
     if (durHours > 5 && lunchDurVal !== 'none') {
       const mid = new Date((sStart.getTime() + sEnd.getTime()) / 2);
-      breaks.push({ type: 'lunch', date: mid, dur: 30 });
+      breaks.push({ type: 'lunch', date: mid, dur: Number(lunchDurVal) });
     }
     if (durHours > 6) {
       const b2 = new Date(sStart.getTime() + 6 * 3600000);
       if (b2 < sEnd) breaks.push({ type: 'break', date: b2, dur: 15 });
+    }
+  } else if (sStart && sEnd) {
+    // If user provided some break times but selected a lunch option without a lunch time,
+    // auto-place lunch at midpoint when shift long enough.
+    const hasLunch = breaks.some(b => b.type === 'lunch');
+    if (!hasLunch && lunchDurVal !== 'none' && durHours > 5) {
+      const mid = new Date((sStart.getTime() + sEnd.getTime()) / 2);
+      breaks.push({ type: 'lunch', date: mid, dur: Number(lunchDurVal) });
+    }
+  }
+
+  // Validate explicit lunch time is within shift bounds; if not, auto-place at midpoint and warn.
+  if (sStart && sEnd && lunch) {
+    const lunchDate = timeToDate(lunch);
+    if (lunchDate && (lunchDate < sStart || lunchDate > sEnd)) {
+      const mid = new Date((sStart.getTime() + sEnd.getTime()) / 2);
+      // replace any lunch entry with corrected one
+      for (let i = 0; i < breaks.length; i++) {
+        if (breaks[i].type === 'lunch') { breaks[i].date = mid; breaks[i].dur = Number(lunchDurVal); }
+      }
+      showToast('Lunch time was outside the shift — placed at midpoint');
     }
   }
 
@@ -465,13 +556,36 @@ function addManual() {
   }
 
   let created = 0;
-  breaks.forEach(b => {
-    if (!b.date) return;
-    const scheduledMs = b.date.getTime();
-    const scheduledTime = b.date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    people.push({ id: uid(), name, zone, type: b.type, role: '', status: 'available', startMs: null, scheduledTime, scheduledMs, shiftStartMs: sStart ? sStart.getTime() : null, shiftEndMs: sEnd ? sEnd.getTime() : null });
-    created++;
-  });
+  // Attach breaks to existing person (same name & zone) or create new person with breaks array
+  const existing = people.find(p => p.name === name && p.zone === zone);
+  if (existing) {
+    if (!existing.breaks) existing.breaks = [];
+    breaks.forEach(b => {
+      if (!b.date) return;
+      const scheduledMs = b.date.getTime();
+      const scheduledTime = b.date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      existing.breaks.push({ id: uid(), type: b.type, scheduledMs, scheduledTime, status: 'scheduled', startMs: null, dur: b.dur || (b.type === 'lunch' ? BREAK_DUR['lunch'] : 15) });
+      created++;
+    });
+    // ensure shift window is set
+    if (sStart) existing.shiftStartMs = sStart.getTime();
+    if (sEnd) existing.shiftEndMs = sEnd.getTime();
+    syncPersonStatus(existing);
+  } else {
+    const personBreaks = [];
+    breaks.forEach(b => {
+      if (!b.date) return;
+      const scheduledMs = b.date.getTime();
+      const scheduledTime = b.date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      personBreaks.push({ id: uid(), type: b.type, scheduledMs, scheduledTime, status: 'scheduled', startMs: null, dur: b.dur || (b.type === 'lunch' ? BREAK_DUR['lunch'] : 15) });
+      created++;
+    });
+    if (personBreaks.length > 0) {
+      const person = { id: uid(), name, zone, role: '', breaks: personBreaks, status: 'available', startMs: null, shiftStartMs: sStart ? sStart.getTime() : null, shiftEndMs: sEnd ? sEnd.getTime() : null };
+      syncPersonStatus(person);
+      people.push(person);
+    }
+  }
 
   if (created === 0) { showToast('No valid break times to add'); return; }
 
@@ -483,7 +597,7 @@ function addManual() {
 
 function resetManualForm() {
   ['manual-name','manual-shift-start','manual-shift-end','manual-first-break','manual-lunch','manual-second-break'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-  const dur = document.getElementById('manual-lunch-duration'); if (dur) dur.value = '30';
+  const dur = document.getElementById('manual-lunch-duration'); if (dur) dur.value = String(BREAK_DUR['lunch']);
   const zone = document.getElementById('manual-zone'); if (zone) zone.value = 'checklanes';
 }
 
@@ -681,7 +795,7 @@ function showParsedResults(rawRows) {
   expanded.forEach(row => {
     const div = document.createElement('div');
     div.className = 'parsed-row' + (row.wasAutoAssigned ? ' auto-assigned' : '');
-    const typeLabel = row.type === 'break' ? '15-min break' : '30-min lunch';
+    const typeLabel = row.type === 'break' ? `${BREAK_DUR['break']}-min break` : `${BREAK_DUR['lunch']}-min lunch`;
     const typeCls = row.type === 'break' ? 'pt-break' : 'pt-lunch';
     div.innerHTML = `
       <div class="parsed-row-main">
@@ -698,15 +812,43 @@ function showParsedResults(rawRows) {
 
 function importSchedule() {
   const parsed = window._parsedSchedule || [];
+  const map = new Map();
+
+  // Group parsed rows by name+zone into person -> breaks
   parsed.forEach(row => {
-    people.push({ id: uid(), name: row.name, zone: row.zone, type: row.type, status: 'available', startMs: null, scheduledTime: row.displayTime, scheduledMs: row.scheduledMs });
+    if (!row.name) return;
+    const name = row.name.trim();
+    const zone = row.zone || 'checklanes';
+    const key = name + '||' + zone;
+    if (!map.has(key)) map.set(key, { name, zone, breaks: [] });
+    const p = map.get(key);
+    const dur = (row.type === 'lunch') ? (BREAK_DUR['lunch'] || 45) : (BREAK_DUR['break'] || 15);
+    p.breaks.push({ id: uid(), type: row.type || 'break', scheduledMs: row.scheduledMs || null, scheduledTime: row.displayTime || '', status: row.scheduledMs ? 'scheduled' : 'scheduled', startMs: null, dur });
   });
+
+  const created = [];
+  map.forEach(v => {
+    // Infer a rough shift window from earliest/latest scheduled breaks (heuristic)
+    const times = v.breaks.map(b => b.scheduledMs).filter(Boolean);
+    let shiftStartMs = null, shiftEndMs = null;
+    if (times.length > 0) {
+      const min = Math.min(...times);
+      const max = Math.max(...times);
+      // assume ~2 hours padding before first and after last scheduled break
+      shiftStartMs = Math.max(0, min - 2 * 3600000);
+      shiftEndMs = max + 2 * 3600000;
+    }
+    const person = { id: uid(), name: v.name, zone: v.zone, role: '', breaks: v.breaks, status: 'available', startMs: null, shiftStartMs, shiftEndMs };
+    syncPersonStatus(person);
+    people.push(person);
+    created.push(person);
+  });
+
   saveState();
   document.getElementById('parsed-section').classList.add('hidden');
   document.getElementById('auto-assign-warning')?.remove();
   document.getElementById('import-success').classList.remove('hidden');
-  const names = new Set(parsed.map(r => r.name)).size;
-  showToast(`${names} team members imported (${parsed.length} break entries)`);
+  showToast(`${created.length} team members imported (${parsed.length} break entries)`);
 }
 
 function resetUpload() {
