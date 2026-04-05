@@ -257,6 +257,8 @@ body {
 .avail-overdue { background: var(--danger-light); color: var(--danger); }
 /* Not-here availability variant */
 .avail-not-here { background: #F3F4F6; color: var(--gray-400); }
+/* Absent availability variant */
+.avail-absent { background: #FFF0F0; color: var(--danger); }
 
 .status-badge {
   font-size: 11px; padding: 3px 9px; border-radius: 20px;

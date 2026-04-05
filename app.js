@@ -319,10 +319,11 @@ function renderBoard() {
       else if (p.status === 'lunch') availClass = 'avail-lunch';
       else if (p.status === 'overdue') availClass = 'avail-overdue';
       else if (p.status === 'not_here') availClass = 'avail-not-here';
-      // Display proper availability label: unavailable when on break/lunch/overdue/not here
+      // Display proper availability label: absent or on break/lunch/overdue/not here are unavailable
       let availLabel = 'Available';
-      if (p.status === 'break' || p.status === 'lunch' || p.status === 'overdue') availLabel = 'Unavailable';
-      if (p.status === 'not_here') availLabel = 'Not here';
+      if (p.absent) { availLabel = 'Unavailable'; availClass = 'avail-absent'; }
+      else if (p.status === 'break' || p.status === 'lunch' || p.status === 'overdue') { availLabel = 'Unavailable'; }
+      else if (p.status === 'not_here') { availLabel = 'Not here'; }
       const availHtml = `<span class="avail-sign ${availClass}">${availLabel}</span>`;
       const shiftLine = (p.shiftStartMs && p.shiftEndMs) ? `${fmtTime(p.shiftStartMs)} — ${fmtTime(p.shiftEndMs)}` : '';
       const paid = computePaidHours(p);
@@ -388,14 +389,16 @@ function toggleNoteExpand(personId) {
 }
 
 function renderStats() {
-  let avail = 0, onBreak = 0, overdue = 0, upcoming = 0, notHere = 0;
+  let avail = 0, onBreak = 0, overdue = 0, upcoming = 0, notHere = 0, absentCount = 0;
   const now = Date.now();
   const soon = 20 * 60000;
   people.forEach(p => {
     if (p.status === 'overdue') overdue++;
     else if (p.status === 'break' || p.status === 'lunch') onBreak++;
     else if (p.status === 'not_here') notHere++;
-    else if (p.status === 'available') {
+    else if (p.absent) {
+      absentCount++;
+    } else if (p.status === 'available') {
       avail++;
       const next = getNextScheduledBreak(p);
       if (next && (next.scheduledMs - now) < soon && (next.scheduledMs - now) > 0) upcoming++;
@@ -409,6 +412,9 @@ function renderStats() {
   // Optionally show not-here count in the UI by reusing stat-overdue slot when needed
   const notHereEl = document.getElementById('stat-not-here');
   if (notHereEl) notHereEl.textContent = notHere;
+  // Update optional absent stat if present
+  const absentEl = document.getElementById('stat-absent');
+  if (absentEl) absentEl.textContent = absentCount;
 }
 
 function renderCoverage() {
