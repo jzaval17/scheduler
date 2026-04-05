@@ -278,6 +278,10 @@
 
   <!-- Toast notification -->
   <div class="toast hidden" id="toast"></div>
+  <div id="undo-bar" class="undo-bar hidden">
+    <span id="undo-text">Action performed</span>
+    <button class="btn-tiny" id="undo-btn" onclick="undoLast()">Undo</button>
+  </div>
 
   <!-- Person detail modal -->
   <div class="modal-overlay hidden" id="modal-overlay" onclick="closeModal()">

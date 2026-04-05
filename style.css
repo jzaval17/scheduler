@@ -213,6 +213,15 @@ body {
 .person-flag.late { background:#FFF3E0; color: var(--amber); }
 .person-flag.absent { background:#FFEBEE; color: var(--danger); }
 .modal-note { width: 100%; min-height: 68px; padding: 8px; border: 1px solid var(--gray-200); border-radius: 8px; font-size: 13px; }
+.undo-bar {
+  position: fixed; left: 16px; bottom: 24px; display: flex; gap: 8px; align-items: center; z-index: 1200;
+  background: rgba(0,0,0,0.8); color: #fff; padding: 8px 12px; border-radius: 8px;
+}
+.undo-bar .btn-tiny { background: rgba(255,255,255,0.08); color: #fff; border-color: rgba(255,255,255,0.12); }
+.inline-note { margin-top:6px; font-size:13px; color:var(--gray-600); }
+.inline-editor { display:flex; gap:8px; margin-top:6px; }
+.inline-editor textarea { flex:1; min-height:44px; padding:6px; border-radius:8px; border:1px solid var(--gray-200); }
+.note-toggle { font-size: 12px; margin-left: 6px; color: var(--red); cursor: pointer; text-decoration: underline; }
 .person-detail { font-size: 12px; color: var(--gray-400); margin-top: 1px; }
 .person-timer { font-size: 12px; color: var(--gray-400); margin-top: 1px; font-family: var(--font-mono); }
 .person-timer.overdue { color: var(--danger); font-weight: 600; }

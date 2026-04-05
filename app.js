@@ -3,6 +3,7 @@ const ZONE_MAX = { checklanes: 2, sco: 2, service: 1, driveup: 1 };
 const TOTAL_ON_BREAK_MAX = 3; // overall max people on break before critical warning
 const ZONE_LABELS = { checklanes: 'Checklanes', sco: 'SCO', service: 'Service Desk', driveup: 'Drive Up' };
 const BREAK_DUR = { break: 15, lunch: 45, lunch60: 60 };
+const NOTE_PREVIEW_LEN = 120;
 
 // The Anthropic API key is no longer stored in the client. Requests
 // are proxied to a server-side function at `/api/anthropic` which reads
@@ -13,6 +14,10 @@ let alerts = [];
 let alertIdCounter = 0;
 let toastTimer = null;
 let activeTab = 'board';
+let lastAction = null;
+let undoTimer = null;
+let inlineEditId = null;
+let inlineNoteDraft = '';
 
 function loadState() {
   try {
@@ -112,11 +117,13 @@ function markBreakDone(personId) {
       }
     }
     if (target) {
+      // record previous state for undo
+      const prev = { status: target.status, startMs: target.startMs };
       target.status = 'done';
-      // record startMs if not present
       if (!target.startMs && target.scheduledMs) target.startMs = target.scheduledMs;
       syncPersonStatus(p);
       saveState();
+      pushUndo({ action: 'markBreakDone', personId: p.id, breakId: target.id, prev, message: `${p.name} — ${target.type} marked taken` });
       showToast(`${p.name} — ${target.type} marked taken`);
       render();
     }
@@ -285,11 +292,58 @@ function renderBoard() {
 
       const card = document.createElement('div');
       card.className = 'person-card' + (p.status === 'overdue' ? ' overdue' : '');
-      card.innerHTML = `<div class="avatar ${avClass}">${initials(p.name)}</div><div class="person-info"><div class="person-name">${p.name} ${takenHtml} ${lateHtml} ${absentHtml}</div>${paidHtml}<div class="person-timer${p.status === 'overdue' ? ' overdue' : ''}">${timerText}</div></div><span class="status-badge ${sbClass}">${sbLabel}</span>`;
-      card.onclick = () => openModal(p.id);
+        // Note display or inline editor
+        let noteHtml = '';
+        if (p.note) {
+          const full = escapeHtml(p.note);
+          if (full.length <= NOTE_PREVIEW_LEN) {
+            noteHtml = `<div class="inline-note">${full}</div>`;
+          } else if (p.noteExpanded) {
+            noteHtml = `<div class="inline-note">${full} <a class="note-toggle" href="#" onclick="event.stopPropagation();toggleNoteExpand('${p.id}');return false;">Show less</a></div>`;
+          } else {
+            const preview = full.slice(0, NOTE_PREVIEW_LEN) + '…';
+            noteHtml = `<div class="inline-note">${preview} <a class="note-toggle" href="#" onclick="event.stopPropagation();toggleNoteExpand('${p.id}');return false;">Show more</a></div>`;
+          }
+        }
+        let editorHtml = '';
+        if (inlineEditId === p.id) {
+          editorHtml = `<div class="inline-editor"><textarea id="inline-note-${p.id}">${p.note||''}</textarea><div style="display:flex;flex-direction:column;gap:6px;"><button class="btn-primary" onclick="event.stopPropagation();saveInline('${p.id}')">Save</button><button class="btn-secondary" onclick="event.stopPropagation();cancelInline()">Cancel</button></div></div>`;
+        }
+
+        const actions = `<div style="display:flex;gap:6px;margin-top:8px"><button class="btn-tiny" onclick="event.stopPropagation();startInline('${p.id}')">Edit</button><button class="btn-tiny" onclick="event.stopPropagation();toggleLate('${p.id}')">${p.late? 'Clear late':'Late'}</button><button class="btn-tiny" onclick="event.stopPropagation();toggleAbsent('${p.id}')">${p.absent? 'Clear absent':'Absent'}</button>${(next && next.scheduledMs && next.scheduledMs <= Date.now())?`<button class="btn-tiny" onclick="event.stopPropagation();markBreakDone('${p.id}')">Mark taken</button>`:''}</div>`;
+
+        card.innerHTML = `<div class="avatar ${avClass}">${initials(p.name)}</div><div class="person-info"><div class="person-name">${p.name} ${takenHtml} ${lateHtml} ${absentHtml}</div>${paidHtml}<div class="person-timer${p.status === 'overdue' ? ' overdue' : ''}">${timerText}</div>${noteHtml}${editorHtml}${actions}</div><span class="status-badge ${sbClass}">${sbLabel}</span>`;
+        card.onclick = () => openModal(p.id);
       list.appendChild(card);
     });
   });
+}
+
+// Inline edit helpers
+function startInline(personId) {
+  inlineEditId = personId;
+  render();
+}
+function cancelInline() { inlineEditId = null; render(); }
+function saveInline(personId) {
+  const el = document.getElementById('inline-note-' + personId);
+  if (!el) { cancelInline(); return; }
+  const p = people.find(x => x.id === personId);
+  if (!p) return;
+  p.note = el.value.trim();
+  inlineEditId = null; saveState(); showToast('Note saved'); render();
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/[&<>"']/g, function(m) { return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]; });
+}
+
+function toggleNoteExpand(personId) {
+  const p = people.find(x => x.id === personId);
+  if (!p) return;
+  p.noteExpanded = !p.noteExpanded;
+  saveState(); render();
 }
 
 function renderStats() {
@@ -497,10 +551,52 @@ function saveNote(personId) {
   render();
 }
 
+// Undo support
+function pushUndo(obj) {
+  lastAction = obj;
+  const ub = document.getElementById('undo-bar');
+  const ut = document.getElementById('undo-text');
+  if (ut) ut.textContent = obj?.message || 'Action performed';
+  if (ub) ub.classList.remove('hidden');
+  clearTimeout(undoTimer);
+  undoTimer = setTimeout(() => { lastAction = null; ub.classList.add('hidden'); }, 6000);
+}
+
+function undoLast() {
+  if (!lastAction) { showToast('Nothing to undo'); return; }
+  const act = lastAction;
+  lastAction = null;
+  const ub = document.getElementById('undo-bar'); if (ub) ub.classList.add('hidden');
+  clearTimeout(undoTimer);
+  if (act.action === 'markBreakDone') {
+    const p = people.find(x => x.id === act.personId);
+    if (p && p.breaks) {
+      const b = p.breaks.find(x => x.id === act.breakId);
+      if (b) {
+        b.status = act.prev.status;
+        b.startMs = act.prev.startMs;
+        syncPersonStatus(p);
+        saveState(); showToast('Undo: break marked back'); render(); return;
+      }
+    }
+  } else if (act.action === 'toggleLate') {
+    const p = people.find(x => x.id === act.personId); if (!p) return;
+    p.late = act.prev;
+    saveState(); showToast('Undo: late cleared'); render(); return;
+  } else if (act.action === 'toggleAbsent') {
+    const p = people.find(x => x.id === act.personId); if (!p) return;
+    p.absent = act.prev;
+    saveState(); showToast('Undo: absent cleared'); render(); return;
+  }
+  showToast('Nothing to undo');
+}
+
 function toggleLate(personId) {
   const p = people.find(x => x.id === personId);
   if (!p) return;
+  const prev = !!p.late;
   p.late = !p.late;
+  pushUndo({ action: 'toggleLate', personId, prev, message: p.late ? `${p.name} marked late` : 'Late cleared' });
   if (p.late) pushAlert({ type: 'info', msg: `${p.name} marked late` });
   saveState(); render();
 }
@@ -508,7 +604,9 @@ function toggleLate(personId) {
 function toggleAbsent(personId) {
   const p = people.find(x => x.id === personId);
   if (!p) return;
+  const prev = !!p.absent;
   p.absent = !p.absent;
+  pushUndo({ action: 'toggleAbsent', personId, prev, message: p.absent ? `${p.name} marked absent` : 'Absent cleared' });
   if (p.absent) pushAlert({ type: 'urgent', msg: `${p.name} marked absent` });
   saveState(); render();
 }
