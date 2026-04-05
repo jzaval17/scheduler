@@ -1,5 +1,6 @@
 // ── State ──────────────────────────────────────────────────────────
 const ZONE_MAX = { checklanes: 2, sco: 2, service: 1, driveup: 1 };
+const TOTAL_ON_BREAK_MAX = 3; // overall max people on break before critical warning
 const ZONE_LABELS = { checklanes: 'Checklanes', sco: 'SCO', service: 'Service Desk', driveup: 'Drive Up' };
 const BREAK_DUR = { break: 15, lunch: 45, lunch60: 60 };
 
@@ -276,13 +277,15 @@ function renderBoard() {
 
       const taken = p.breaks && p.breaks.some(b => b.status === 'done');
       const takenHtml = taken ? '<span class="taken-badge">✓</span>' : '';
+      const lateHtml = p.late ? '<span class="person-flag late">Late</span>' : '';
+      const absentHtml = p.absent ? '<span class="person-flag absent">Absent</span>' : '';
       const shiftLine = (p.shiftStartMs && p.shiftEndMs) ? `${fmtTime(p.shiftStartMs)} — ${fmtTime(p.shiftEndMs)}` : '';
       const paid = computePaidHours(p);
       const paidHtml = (paid !== null && paid !== undefined) ? `<div class="person-shift">${shiftLine} · ${paid} hrs</div>` : (shiftLine ? `<div class="person-shift">${shiftLine}</div>` : '');
 
       const card = document.createElement('div');
       card.className = 'person-card' + (p.status === 'overdue' ? ' overdue' : '');
-      card.innerHTML = `<div class="avatar ${avClass}">${initials(p.name)}</div><div class="person-info"><div class="person-name">${p.name} ${takenHtml}</div>${paidHtml}<div class="person-timer${p.status === 'overdue' ? ' overdue' : ''}">${timerText}</div></div><span class="status-badge ${sbClass}">${sbLabel}</span>`;
+      card.innerHTML = `<div class="avatar ${avClass}">${initials(p.name)}</div><div class="person-info"><div class="person-name">${p.name} ${takenHtml} ${lateHtml} ${absentHtml}</div>${paidHtml}<div class="person-timer${p.status === 'overdue' ? ' overdue' : ''}">${timerText}</div></div><span class="status-badge ${sbClass}">${sbLabel}</span>`;
       card.onclick = () => openModal(p.id);
       list.appendChild(card);
     });
@@ -311,16 +314,17 @@ function renderStats() {
 
 function renderCoverage() {
   const active = people.filter(p => isActive(p)).length;
-  const total = people.length || 1;
+  const total = Math.max(1, TOTAL_ON_BREAK_MAX);
   const pct = Math.round((active / total) * 100);
-  const label = pct >= 40 ? 'too many out' : pct >= 25 ? 'caution' : 'ok';
-  const cls = pct >= 40 ? 'cov-danger' : pct >= 25 ? 'cov-warn' : 'cov-ok';
-  const bfill = pct >= 40 ? 'bfill-danger' : pct >= 25 ? 'bfill-warn' : 'bfill-ok';
+  const overLimit = active > TOTAL_ON_BREAK_MAX;
+  const label = overLimit ? 'too many out' : (pct >= 40 ? 'too many out' : pct >= 25 ? 'caution' : 'ok');
+  const cls = overLimit ? 'cov-danger' : (pct >= 40 ? 'cov-danger' : pct >= 25 ? 'cov-warn' : 'cov-ok');
+  const bfill = overLimit ? 'bfill-danger' : (pct >= 40 ? 'bfill-danger' : pct >= 25 ? 'bfill-warn' : 'bfill-ok');
 
   const badge = document.getElementById('cov-total-badge');
   const bar = document.getElementById('cov-bar');
   const pctLbl = document.getElementById('cov-pct-label');
-  if (badge) { badge.textContent = `${active} / ${people.length}`; badge.className = 'cov-badge ' + cls; }
+  if (badge) { badge.textContent = `${active} / ${TOTAL_ON_BREAK_MAX}`; badge.className = 'cov-badge ' + cls; }
   if (bar) { bar.style.width = Math.min(pct, 100) + '%'; bar.className = 'bar-fill ' + bfill; }
   if (pctLbl) pctLbl.textContent = `${pct}% — ${label}`;
 
@@ -331,6 +335,12 @@ function renderCoverage() {
     if (cntEl) cntEl.textContent = cnt;
     if (tile) tile.className = 'zone-tile' + (cnt > ZONE_MAX[zone] ? ' over' : '');
   });
+
+  // If overall on-break exceeds TOTAL_ON_BREAK_MAX, make coverage bar red
+  if (active > TOTAL_ON_BREAK_MAX) {
+    const covNote = document.getElementById('cov-pct-label');
+    if (covNote) covNote.textContent = `${active}/${TOTAL_ON_BREAK_MAX} — too many out`;
+  }
 
   const now = Date.now();
   const upcoming = people.map(p => ({ p, next: getNextScheduledBreak(p) }))
@@ -353,6 +363,13 @@ function renderAlerts() {
   alerts = alerts.filter(a => Date.now() - a.ts < 60*60000);
 
   const liveAlerts = [];
+  const activeCount = people.filter(p => isActive(p)).length;
+  if (activeCount > TOTAL_ON_BREAK_MAX) {
+    liveAlerts.push({ id: 'total-over', type: 'urgent',
+      msg: `${activeCount} people on break — max is ${TOTAL_ON_BREAK_MAX}`,
+      actions: [{ label: 'View coverage', fn: "switchTab('coverage')" }] });
+  }
+
   people.filter(p => p.status === 'overdue').forEach(p => {
     const over = getElapsedMin(p) - getDur(p);
     liveAlerts.push({ id: 'overdue-' + p.id, type: 'urgent',
@@ -450,7 +467,9 @@ function openModal(personId) {
     <div class="modal-info-row"><span class="modal-info-label">Shift</span><span class="modal-info-value">${shiftText}</span></div>
     <div class="modal-info-row"><span class="modal-info-label">Next break</span><span class="modal-info-value">${(next && next.scheduledTime) ? next.scheduledTime : (p.scheduledTime||'—')}</span></div>
     <div class="modal-info-row"><span class="modal-info-label">Break started</span><span class="modal-info-value">${p.startMs?fmtTime(p.startMs):'—'}</span></div>
-    <div class="modal-info-row"><span class="modal-info-label">Time remaining</span><span class="modal-info-value">${isActive(p)?(remaining>0?remaining+' min':'Overdue by '+Math.abs(remaining)+' min'):'—'}</span></div>`;
+    <div class="modal-info-row"><span class="modal-info-label">Time remaining</span><span class="modal-info-value">${isActive(p)?(remaining>0?remaining+' min':'Overdue by '+Math.abs(remaining)+' min'):'—'}</span></div>
+    <div style="margin-top:10px"><label style="display:block;font-size:12px;color:var(--gray-400);margin-bottom:6px">Note</label><textarea id="modal-note" class="modal-note">${p.note || ''}</textarea></div>
+    <div style="display:flex;gap:8px;margin-top:8px;"><button class="modal-btn" onclick="saveNote('${p.id}');closeModal()">Save note</button><button class="modal-btn" onclick="toggleLate('${p.id}');closeModal()">${p.late? 'Clear late':'Mark late'}</button><button class="modal-btn" onclick="toggleAbsent('${p.id}');closeModal()">${p.absent? 'Clear absent':'Mark absent'}</button></div>`;
   overlay.classList.remove('hidden');
 }
 
@@ -465,6 +484,33 @@ function startBreak(personId, type) {
     p.status = type === 'lunch' ? 'lunch' : type;
   p.type = type; p.startMs = Date.now();
     saveState(); showToast(`${p.name} — ${type==='break'?`${BREAK_DUR['break']}-min break`:type==='lunch'?`${BREAK_DUR['lunch']}-min lunch`:''} started`); render();
+}
+
+function saveNote(personId) {
+  const p = people.find(x => x.id === personId);
+  if (!p) return;
+  const el = document.getElementById('modal-note');
+  if (!el) return;
+  p.note = el.value.trim();
+  saveState();
+  showToast('Note saved');
+  render();
+}
+
+function toggleLate(personId) {
+  const p = people.find(x => x.id === personId);
+  if (!p) return;
+  p.late = !p.late;
+  if (p.late) pushAlert({ type: 'info', msg: `${p.name} marked late` });
+  saveState(); render();
+}
+
+function toggleAbsent(personId) {
+  const p = people.find(x => x.id === personId);
+  if (!p) return;
+  p.absent = !p.absent;
+  if (p.absent) pushAlert({ type: 'urgent', msg: `${p.name} marked absent` });
+  saveState(); render();
 }
 
 function markReturned(personId) {

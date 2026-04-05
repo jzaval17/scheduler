@@ -214,8 +214,14 @@
             <input type="text" id="manual-name" placeholder="Team member name" class="form-input">
             <div style="font-size:13px;color:var(--gray-400);margin-bottom:8px">You can enter a full shift (start/end) and optional break times. Leave break fields empty to auto-assign based on shift length.</div>
             <div class="form-row">
-              <input type="time" id="manual-shift-start" class="form-input" placeholder="Clock in">
-              <input type="time" id="manual-shift-end" class="form-input" placeholder="Clock out">
+              <div style="flex:1">
+                <label style="display:block;font-size:12px;color:var(--gray-400);margin-bottom:6px">Start (Clock in)</label>
+                <input type="time" id="manual-shift-start" class="form-input" placeholder="Clock in">
+              </div>
+              <div style="flex:1">
+                <label style="display:block;font-size:12px;color:var(--gray-400);margin-bottom:6px">End (Clock out)</label>
+                <input type="time" id="manual-shift-end" class="form-input" placeholder="Clock out">
+              </div>
             </div>
             <div class="form-row" style="align-items:flex-start; gap:12px;">
               <div style="flex:1">
