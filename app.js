@@ -308,8 +308,7 @@ function renderBoard() {
         }
       }
 
-      const taken = p.breaks && p.breaks.some(b => b.status === 'done');
-      const takenHtml = taken ? '<span class="taken-badge">✓</span>' : '';
+      // removed taken checkmark -- using compact break dots instead
       const lateHtml = p.late ? '<span class="person-flag late">Late</span>' : '';
       const absentHtml = p.absent ? '<span class="person-flag absent">Absent</span>' : '';
       const clockOutHtml = p.clockOutOverdue ? '<span class="person-flag absent">Overtime</span>' : (p.shouldClockOut ? '<span class="person-flag late">Clock out</span>' : '');
