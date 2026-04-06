@@ -21,6 +21,7 @@ let lastAction = null;
 let undoTimer = null;
 let inlineEditId = null;
 let inlineNoteDraft = '';
+let showOffline = true;
 
 function loadState() {
   try {
@@ -1633,7 +1634,6 @@ updateClock();
 setInterval(updateClock, 10000);
 
 // UI: control to hide/show absent & clocked-out people to reduce board clutter
-let showOffline = true;
 function toggleShowOffline() {
   showOffline = !showOffline;
   const btn = document.getElementById('toggle-offline-btn');
