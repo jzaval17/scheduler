@@ -58,8 +58,40 @@ function loadState() {
   } catch(e) { people = []; }
 }
 
+function sanitizePeople() {
+  if (!Array.isArray(people)) people = [];
+  people = people.map(p => {
+    if (!p) return null;
+    if (!p.id) p.id = uid();
+    p.name = (p.name || '').trim();
+    p.zone = p.zone || 'checklanes';
+    p.role = p.role || '';
+    p.breaks = Array.isArray(p.breaks) ? p.breaks.map(b => {
+      if (!b) return null;
+      if (!b.id) b.id = uid();
+      b.type = b.type || 'break';
+      if (!b.scheduledMs && b.scheduledTime) {
+        const parsed = parseMilTime(b.scheduledTime);
+        if (parsed) b.scheduledMs = parsed.getTime();
+      }
+      b.scheduledMs = b.scheduledMs ? Number(b.scheduledMs) : null;
+      b.scheduledTime = b.scheduledTime || (b.scheduledMs ? fmtTime(b.scheduledMs) : '');
+      b.status = b.status || 'scheduled';
+      b.startMs = b.startMs ? Number(b.startMs) : null;
+      b.dur = b.dur || (b.type === 'lunch' ? BREAK_DUR['lunch'] : BREAK_DUR['break']);
+      return b;
+    }).filter(Boolean) : [];
+    p.shiftStartMs = p.shiftStartMs ? Number(p.shiftStartMs) : null;
+    p.shiftEndMs = p.shiftEndMs ? Number(p.shiftEndMs) : null;
+    p.startMs = p.startMs ? Number(p.startMs) : null;
+    p.absent = !!p.absent; p.clockedOut = !!p.clockedOut; p.late = !!p.late;
+    syncPersonStatus(p);
+    return p;
+  }).filter(Boolean);
+}
+
 function saveState() {
-  try { localStorage.setItem('bm_people', JSON.stringify(people)); } catch(e) {}
+  try { sanitizePeople(); localStorage.setItem('bm_people', JSON.stringify(people)); } catch(e) {}
 }
 
 function initials(name) {
@@ -940,6 +972,7 @@ function removePerson(personId) {
 }
 
 function addManual() {
+  try {
   const name = document.getElementById('manual-name')?.value.trim();
   if (!name) { showToast('Please enter a name'); return; }
 
@@ -1063,6 +1096,10 @@ function addManual() {
   resetManualForm();
   showToast(`${name} — ${created} break${created>1?'s':''} added to ${ZONE_LABELS[zone]}`);
   switchTab('board');
+  } catch (e) {
+    console.error('addManual error', e);
+    showToast('Error adding person. See console.');
+  }
 }
 
 function resetManualForm() {
@@ -1191,6 +1228,7 @@ Skip any row with no name. Return only the JSON array.`;
 
 // ── Parse results + auto-zone warning ────────────────────────────────
 function showParsedResults(rawRows) {
+  try {
   document.getElementById('scan-loading').classList.add('hidden');
 
   const expanded = [];
@@ -1278,9 +1316,11 @@ function showParsedResults(rawRows) {
   });
 
   document.getElementById('parsed-section').classList.remove('hidden');
+  } catch (e) { console.error('showParsedResults error', e); showToast('Error parsing schedule.'); }
 }
 
 function importSchedule() {
+  try {
   const parsed = window._parsedSchedule || [];
   const map = new Map();
 
@@ -1319,6 +1359,10 @@ function importSchedule() {
   document.getElementById('auto-assign-warning')?.remove();
   document.getElementById('import-success').classList.remove('hidden');
   showToast(`${created.length} team members imported (${parsed.length} break entries)`);
+  } catch (e) {
+    console.error('importSchedule error', e);
+    showToast('Error importing schedule. See console.');
+  }
 }
 
 function resetUpload() {
