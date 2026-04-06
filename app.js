@@ -1601,6 +1601,27 @@ function manualRefresh() {
   setTimeout(() => { try { document.getElementById('refresh-btn')?.classList.remove('pulse'); } catch(e){} }, 800);
 }
 
+// Debug helpers: global error capture and state dump
+window.addEventListener('error', function (ev) {
+  try {
+    console.error('Uncaught error', ev.error || ev.message, ev.filename + ':' + ev.lineno + ':' + ev.colno);
+    showToast('Error: ' + (ev.message || 'See console'));
+  } catch (e) {}
+});
+window.addEventListener('unhandledrejection', function (ev) {
+  try { console.error('Unhandled promise rejection', ev.reason); showToast('Async error: see console'); } catch (e) {}
+});
+
+function dumpState() {
+  try {
+    const s = { people, alerts, scheduledNotifications: Array.from(scheduledNotifications.entries()), notifiedPush: Array.from(notifiedPush), scheduledTriggers: Array.from(scheduledTriggers) };
+    console.log('Break Manager state dump:', s);
+    // copy to clipboard for easy sharing
+    const txt = JSON.stringify(s, null, 2);
+    navigator.clipboard?.writeText(txt).then(() => showToast('State copied to clipboard'), () => showToast('State logged to console'));
+  } catch (e) { console.error('dumpState error', e); showToast('Could not dump state'); }
+}
+
 // ── Init ──────────────────────────────────────────────────────────────
 loadState();
 requestNotificationPermission();
