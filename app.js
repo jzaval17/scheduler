@@ -117,8 +117,26 @@ function getNextScheduledBreak(person) {
     if ((!b.scheduledMs || b.scheduledMs === null) && b.scheduledTime) {
       const parsed = parseMilTime(b.scheduledTime);
       if (parsed) {
+        let parsedMs = parsed.getTime();
+        // If the person has an explicit shift start, align scheduled time to that shift's date
+        if (person.shiftStartMs) {
+          try {
+            const shiftDate = new Date(person.shiftStartMs);
+            // set hours/minutes from parsed
+            shiftDate.setHours(parsed.getHours(), parsed.getMinutes(), 0, 0);
+            parsedMs = shiftDate.getTime();
+            // if parsed time ended up before shiftStart, assume next day
+            if (parsedMs < person.shiftStartMs) parsedMs += 24 * 3600000;
+          } catch (e) {}
+        } else {
+          // If no shift start, prefer future times: if parsed time appears sufficiently in the past,
+          // assume it's for the next day (user-entered schedule for tomorrow).
+          if (parsed.getTime() < (Date.now() - (6 * 3600000))) {
+            parsedMs = parsed.getTime() + 24 * 3600000;
+          } else parsedMs = parsed.getTime();
+        }
         // set scheduledMs for future comparisons (mutates the object permanently)
-        b.scheduledMs = parsed.getTime();
+        b.scheduledMs = parsedMs;
       }
     }
   });
@@ -258,6 +276,8 @@ function tick() {
         }
       }
     });
+    // If shift hasn't started yet, skip shift-end and lunch checks
+    if (p.status === 'not_here') { p.clockOutOverdue = false; p.shouldClockOut = false; syncPersonStatus(p); return; }
     // Check shift end (clock-out) status
     if (p.shiftEndMs) {
       if (now > p.shiftEndMs) {
@@ -306,7 +326,7 @@ function tick() {
 
 // ── Rendering ─────────────────────────────────────────────────────────
 function render() {
-  renderBoard(); renderStats(); renderCoverage(); renderAlerts(); renderAlertBanner(); updateClock();
+  renderShiftTimeline(); renderBoard(); renderStats(); renderCoverage(); renderAlerts(); renderAlertBanner(); updateClock();
 }
 
 function renderBoard() {
@@ -1384,7 +1404,7 @@ function scheduleClientFallback(obj) {
           // double-check person still eligible
           const personId = obj.data && obj.data.personId;
           const p = people.find(x => x.id === personId);
-          if (!p || p.absent || p.clockedOut) {
+          if (!p || p.absent || p.clockedOut || p.status === 'not_here') {
             // cancel
             cancelScheduledNotification(obj.tag);
             return;
@@ -1421,7 +1441,7 @@ function checkPushNotifications() {
   if (!('Notification' in window)) return;
   // Notify for active/overdue breaks
   people.forEach(p => {
-    if (p.absent || p.clockedOut) return; // do not notify for absent or clocked-out team members
+    if (p.absent || p.clockedOut || p.status === 'not_here') return; // do not notify for absent, clocked-out, or not-yet-started team members
     // overdue break
     if (p.status === 'overdue') {
       const key = 'overdue:' + p.id;
