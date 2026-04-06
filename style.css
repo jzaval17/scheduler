@@ -200,6 +200,16 @@ body {
 /* Slightly gray out clocked-out people to distinguish them */
 .person-card.clocked-out { opacity: 0.64; filter: grayscale(0.12); }
 
+/* Timeline overview */
+.timeline-section { padding: 8px 12px; background: #fff; border-bottom: 1px solid var(--gray-200); }
+.timeline-wrap { display:flex; gap:8px; overflow:auto; padding:6px 2px; }
+.timeline-item { min-width:160px; border:1px solid var(--gray-100); background:#fff; border-radius:8px; padding:8px; display:flex; gap:8px; align-items:center; }
+.timeline-time { font-weight:700; font-family: var(--font-mono); width:56px; color:var(--gray-800); }
+.timeline-name { flex:1; font-weight:600; font-size:13px; }
+.timeline-zone { font-size:11px; color:var(--gray-400); }
+.timeline-action .btn-tiny { padding:6px 8px; }
+.btn-send-now { background: var(--amber-light); color: var(--amber); border-color: transparent; }
+
 .avatar {
   width: 36px; height: 36px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;

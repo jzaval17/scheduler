@@ -347,6 +347,8 @@ function renderBoard() {
       if (oa === ob) return (a.name || '').localeCompare(b.name || '');
       return oa - ob;
     }).forEach(p => {
+      // If hiding offline, skip absent/clocked-out persons in the board list
+      if (!showOffline && (p.absent || p.clockedOut)) return;
       // Determine active break or next scheduled
       const activeBreak = p.breaks ? p.breaks.find(b => b.status === 'active' || b.status === 'overdue') : null;
       const next = getNextScheduledBreak(p);
@@ -450,7 +452,10 @@ function renderBoard() {
 
         const editActions = `<button class="btn-tiny" onclick="event.stopPropagation();openModal('${p.id}')">Edit breaks</button>`;
         const clockOutBtn = (!p.clockedOut && (p.shouldClockOut || p.clockOutOverdue)) ? `<button class="btn-tiny" onclick="event.stopPropagation();manualClockOut('${p.id}')">Clock out</button>` : '';
-        const actions = `<div style="display:flex;gap:6px;margin-top:8px"><button class="btn-tiny" onclick="event.stopPropagation();startInline('${p.id}')">Edit</button><button class="btn-tiny" onclick="event.stopPropagation();toggleLate('${p.id}')">${p.late? 'Clear late':'Late'}</button><button class="btn-tiny" onclick="event.stopPropagation();toggleAbsent('${p.id}')">${p.absent? 'Clear absent':'Absent'}</button>${clockOutBtn}${(next && next.scheduledMs && next.scheduledMs <= Date.now())?`<button class="btn-tiny" onclick="event.stopPropagation();markBreakDone('${p.id}')">Mark taken</button>`:''}${editActions}</div>`;
+        // Add a quick-send button and a "Send now" prompt when upcoming soon
+        const quickSendBtn = `<button class="btn-tiny" onclick="event.stopPropagation();startBreak('${p.id}','break')">Send</button>`;
+        const sendNowBtn = soonFlag ? `<button class="btn-tiny btn-send-now" onclick="event.stopPropagation();startBreak('${p.id}','break')">Send now</button>` : '';
+        const actions = `<div style="display:flex;gap:6px;margin-top:8px">${quickSendBtn}${sendNowBtn}<button class="btn-tiny" onclick="event.stopPropagation();startInline('${p.id}')">Edit</button><button class="btn-tiny" onclick="event.stopPropagation();toggleLate('${p.id}')">${p.late? 'Clear late':'Late'}</button><button class="btn-tiny" onclick="event.stopPropagation();toggleAbsent('${p.id}')">${p.absent? 'Clear absent':'Absent'}</button>${clockOutBtn}${(next && next.scheduledMs && next.scheduledMs <= Date.now())?`<button class="btn-tiny" onclick="event.stopPropagation();markBreakDone('${p.id}')">Mark taken</button>`:''}${editActions}</div>`;
 
         // Add an upbeat animation class when a break is actively running
         const animClass = (activeBreak && activeBreak.status === 'active') ? ' active-anim' : '';
@@ -1541,3 +1546,37 @@ restoreScheduledNotifications();
 setInterval(() => { tick(); checkPushNotifications(); }, 15000);
 updateClock();
 setInterval(updateClock, 10000);
+
+// UI: control to hide/show absent & clocked-out people to reduce board clutter
+let showOffline = true;
+function toggleShowOffline() {
+  showOffline = !showOffline;
+  const btn = document.getElementById('toggle-offline-btn');
+  if (btn) btn.classList.toggle('active', showOffline === false);
+  showToast(showOffline ? 'Showing offline people' : 'Hiding offline people');
+  render();
+}
+
+// Render a compact shift timeline: upcoming scheduled breaks across whole shift
+function renderShiftTimeline() {
+  const el = document.getElementById('shift-timeline');
+  if (!el) return;
+  const now = Date.now();
+  const upcoming = [];
+  people.forEach(p => {
+    if (!p.breaks) return;
+    p.breaks.forEach(b => {
+      // Only show scheduled or active breaks that are relevant
+      if (b.status === 'scheduled' && b.scheduledMs && b.scheduledMs > now) upcoming.push({ p, b });
+    });
+  });
+  upcoming.sort((a, b) => a.b.scheduledMs - b.b.scheduledMs);
+  const items = upcoming.slice(0, 12).map(x => {
+    const mins = Math.max(0, Math.round((x.b.scheduledMs - now) / 60000));
+    const time = x.b.scheduledMs ? fmtTime(x.b.scheduledMs) : (x.b.scheduledTime || '—');
+    const cls = x.b.type === 'lunch' ? 'tl-lunch' : 'tl-break';
+    return `<div class="timeline-item ${cls}"><div class="timeline-time">${time}</div><div class="timeline-name">${escapeHtml(x.p.name)}</div><div class="timeline-zone">${ZONE_LABELS[x.p.zone]}</div><div class="timeline-action"><button class="btn-tiny" onclick="event.stopPropagation();startBreak('${x.p.id}','${x.b.type}');return false;">Send</button></div></div>`;
+  }).join('');
+  el.innerHTML = `<div class="timeline-wrap">${items || '<div class="empty-small">No upcoming breaks</div>'}</div>`;
+}
+
