@@ -425,6 +425,11 @@ function renderBoard() {
         sbClass = 'sb-upcoming';
         sbLabel = 'Clocked out';
       }
+      else if (p.status === 'not_here') {
+        sbClass = 'sb-upcoming';
+        sbLabel = 'Not here';
+      }
+      if (p.absent) { sbLabel = 'Absent'; sbClass = 'sb-upcoming'; }
 
       // If person is available, show next scheduled time or mark 'due soon' when within UPCOMING_SOON_MS
       if (!activeBreak && p.status === 'available' && next && next.scheduledMs) {
@@ -510,7 +515,7 @@ function renderBoard() {
           primaryBtn = `<button class="btn-tiny btn-ok" onclick="event.stopPropagation();markReturned('${p.id}')">Returned</button>`;
         } else if (next && next.scheduledMs && next.scheduledMs <= Date.now()) {
           primaryBtn = `<button class="btn-tiny btn-warn" onclick="event.stopPropagation();markBreakDone('${p.id}')">Mark taken</button>`;
-        } else if (p.status === 'available') {
+        } else if (p.status === 'available' && !p.absent) {
           primaryBtn = `<button class="btn-tiny" onclick="event.stopPropagation();startBreak('${p.id}','break')">Send break</button>`;
         }
         const actions = `<div class="card-actions">${primaryBtn}${clockOutBtn}${editActions}</div>`;
@@ -756,7 +761,9 @@ function openModal(personId) {
   const next = getNextScheduledBreak(p);
   const hasDue = p.breaks && (p.breaks.find(b => b.status === 'active' || b.status === 'overdue') || (next && next.scheduledMs && next.scheduledMs <= now));
   let actionsHtml = '';
-  if (p.status === 'available') {
+  if (p.absent || p.status === 'not_here' || p.status === 'clocked_out') {
+    // No break/lunch actions for unavailable people
+  } else if (p.status === 'available') {
     actionsHtml += `<div class="modal-action-row"><button class="modal-btn start-break" onclick="startBreak('${p.id}','break');closeModal()">Start ${BREAK_DUR['break']}-min break</button><button class="modal-btn start-lunch" onclick="startBreak('${p.id}','lunch');closeModal()">Start ${BREAK_DUR['lunch']}-min lunch</button></div>`;
   } else {
     actionsHtml += `<div class="modal-action-row"><button class="modal-btn mark-back" onclick="markReturned('${p.id}');closeModal()">Mark returned</button></div>`;
