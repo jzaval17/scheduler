@@ -472,6 +472,13 @@ function renderBoard() {
       const shiftLine = (p.shiftStartMs && p.shiftEndMs) ? `${fmtTime(p.shiftStartMs)} — ${fmtTime(p.shiftEndMs)}` : '';
       const paid = computePaidHours(p);
       const paidHtml = (paid !== null && paid !== undefined) ? `<div class="person-shift">${shiftLine} · ${paid} hrs</div>` : (shiftLine ? `<div class="person-shift">${shiftLine}</div>` : '');
+      let shiftBarHtml = '';
+      if (p.shiftStartMs && p.shiftEndMs) {
+        const now = Date.now();
+        const rawPct = Math.min(100, Math.max(0, Math.round((now - p.shiftStartMs) / (p.shiftEndMs - p.shiftStartMs) * 100)));
+        const barCls = rawPct >= 90 ? 'sbar-end' : rawPct >= 60 ? 'sbar-mid' : 'sbar-start';
+        shiftBarHtml = `<div class="shift-bar-track"><div class="shift-bar-fill ${barCls}" style="width:${rawPct}%"></div></div>`;
+      }
 
       // Build compact per-break indicators (small dots) to reduce visual clutter
       let breakBadges = '';
@@ -531,7 +538,7 @@ function renderBoard() {
         const avatarHtml = overdueMin > 0
           ? `<div class="avatar-wrap"><div class="avatar ${avClass}${animClass}">${initials(p.name)}</div><span class="overdue-badge">+${overdueMin}m</span></div>`
           : `<div class="avatar ${avClass}${animClass}">${initials(p.name)}</div>`;
-        card.innerHTML = `${avatarHtml}<div class="person-info"><div class="person-name">${availHtml} ${p.name} ${takenHtml} ${lateHtml} ${absentHtml} ${clockOutHtml}</div>${breakBadges}${paidHtml}<div class="person-timer${p.status === 'overdue' ? ' overdue' : ''}">${timerText}</div>${noteHtml}${editorHtml}${actions}</div><span class="status-badge ${sbClass}">${sbLabel}</span>`;
+        card.innerHTML = `${avatarHtml}<div class="person-info"><div class="person-name">${availHtml} ${p.name} ${takenHtml} ${lateHtml} ${absentHtml} ${clockOutHtml}</div>${shiftBarHtml}${breakBadges}${paidHtml}<div class="person-timer${p.status === 'overdue' ? ' overdue' : ''}">${timerText}</div>${noteHtml}${editorHtml}${actions}</div><span class="status-badge ${sbClass}">${sbLabel}</span>`;
         if (soonFlag) card.classList.add('soon');
         if (p.clockedOut) card.classList.add('clocked-out');
         if (p.status === 'not_here') card.classList.add('not-here');
