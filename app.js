@@ -508,7 +508,7 @@ function renderBoard() {
         }
 
         const editActions = `<button class="btn-tiny" onclick="event.stopPropagation();openModal('${p.id}')">Edit</button>`;
-        const clockOutBtn = (!p.clockedOut && (p.shouldClockOut || p.clockOutOverdue)) ? `<button class="btn-tiny btn-warn" onclick="event.stopPropagation();manualClockOut('${p.id}')">Clock out</button>` : '';
+        const clockOutBtn = (!p.clockedOut && !p.absent && (p.status === 'available' || p.shouldClockOut || p.clockOutOverdue)) ? `<button class="btn-tiny btn-warn" onclick="event.stopPropagation();manualClockOut('${p.id}')">Clock out</button>` : '';
         // Core quick actions only — late/absent/note moved into modal
         let primaryBtn = '';
         if (isActive(p)) {
@@ -768,8 +768,8 @@ function openModal(personId) {
   } else {
     actionsHtml += `<div class="modal-action-row"><button class="modal-btn mark-back" onclick="markReturned('${p.id}');closeModal()">Mark returned</button></div>`;
   }
-  // Offer manual clock-out when shift has ended
-  if (!p.clockedOut && (p.shouldClockOut || p.clockOutOverdue)) {
+  // Offer manual clock-out when available on shift or when shift has ended
+  if (!p.clockedOut && !p.absent && (p.status === 'available' || p.shouldClockOut || p.clockOutOverdue)) {
     actionsHtml += `<div class="modal-action-row"><button class="modal-btn ok" onclick="manualClockOut('${p.id}');closeModal()">Clock out</button></div>`;
   }
   if (hasDue) {
