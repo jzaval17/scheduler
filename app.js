@@ -515,7 +515,7 @@ function renderBoard() {
         let primaryBtn = '';
         if (isActive(p)) {
           primaryBtn = `<button class="btn-tiny btn-ok" onclick="event.stopPropagation();markReturned('${p.id}')">Returned</button>`;
-        } else if (next && next.scheduledMs && next.scheduledMs <= Date.now()) {
+        } else if (next && next.scheduledMs && next.scheduledMs <= Date.now() && p.status !== 'not_here') {
           primaryBtn = `<button class="btn-tiny btn-warn" onclick="event.stopPropagation();markBreakDone('${p.id}')">Mark taken</button>`;
         } else if (p.status === 'available' && !p.absent) {
           primaryBtn = `<button class="btn-tiny" onclick="event.stopPropagation();startBreak('${p.id}','break')">Send break</button>`;
@@ -1718,7 +1718,7 @@ function renderShiftTimeline() {
   const now = Date.now();
   const upcoming = [];
   people.forEach(p => {
-    if (p.absent || p.clockedOut) return;
+    if (p.absent || p.clockedOut || p.status === 'not_here') return;
     if (!p.breaks) return;
     p.breaks.forEach(b => {
       if (b.status === 'scheduled' && b.scheduledMs && b.scheduledMs > now) {
