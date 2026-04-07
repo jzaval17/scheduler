@@ -616,11 +616,14 @@ function renderCoverage() {
   if (pctLbl) pctLbl.textContent = `${pct}% — ${label}`;
 
   Object.keys(ZONE_MAX).forEach(zone => {
-    const cnt = people.filter(p => p.zone === zone && isActive(p)).length;
+    const onBreak = people.filter(p => p.zone === zone && isActive(p)).length;
+    const total = people.filter(p => p.zone === zone && !p.absent && !p.clockedOut).length;
     const tile = document.getElementById('ztile-' + zone);
     const cntEl = document.getElementById('zcnt-' + zone);
-    if (cntEl) cntEl.textContent = cnt;
-    if (tile) tile.className = 'zone-tile' + (cnt > ZONE_MAX[zone] ? ' over' : '');
+    const maxEl = tile ? tile.querySelector('.zone-tile-max') : null;
+    if (cntEl) cntEl.textContent = total;
+    if (maxEl) maxEl.textContent = onBreak > 0 ? `${onBreak} on break · max ${ZONE_MAX[zone]} at once` : `max ${ZONE_MAX[zone]} at once`;
+    if (tile) tile.className = 'zone-tile' + (onBreak > ZONE_MAX[zone] ? ' over' : '');
   });
 
   // If overall on-break exceeds TOTAL_ON_BREAK_MAX, make coverage bar red
