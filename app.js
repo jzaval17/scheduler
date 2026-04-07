@@ -534,6 +534,8 @@ function renderBoard() {
         card.innerHTML = `${avatarHtml}<div class="person-info"><div class="person-name">${availHtml} ${p.name} ${takenHtml} ${lateHtml} ${absentHtml} ${clockOutHtml}</div>${breakBadges}${paidHtml}<div class="person-timer${p.status === 'overdue' ? ' overdue' : ''}">${timerText}</div>${noteHtml}${editorHtml}${actions}</div><span class="status-badge ${sbClass}">${sbLabel}</span>`;
         if (soonFlag) card.classList.add('soon');
         if (p.clockedOut) card.classList.add('clocked-out');
+        if (p.status === 'not_here') card.classList.add('not-here');
+        if (p.absent) card.classList.add('absent-card');
         card.onclick = () => openModal(p.id);
       list.appendChild(card);
     });

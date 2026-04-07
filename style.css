@@ -199,8 +199,10 @@ body {
 .person-card.overdue { background: var(--danger-light); }
 .person-card.overdue:hover { background: #FFCDD2; }
 
-/* Slightly gray out clocked-out people to distinguish them */
-.person-card.clocked-out { opacity: 0.64; filter: grayscale(0.12); }
+/* Grey out unavailable people */
+.person-card.clocked-out { opacity: 0.45; filter: grayscale(0.4); }
+.person-card.not-here    { opacity: 0.45; filter: grayscale(0.4); }
+.person-card.absent-card { opacity: 0.45; filter: grayscale(0.4); background: #FAFAFA; }
 
 /* Timeline overview */
 .timeline-section { padding: 8px 12px; background: #fff; border-bottom: 1px solid var(--gray-200); }
