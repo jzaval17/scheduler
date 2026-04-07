@@ -180,6 +180,8 @@ body {
 .pill-ok { background: var(--green-light); color: var(--green); }
 .pill-warn { background: var(--amber-light); color: var(--amber); }
 .pill-danger { background: var(--danger-light); color: var(--danger); }
+.pill-overdue { background: var(--danger); color: #fff; animation: pill-flash 1s ease-in-out infinite; }
+@keyframes pill-flash { 0%,100%{ opacity:1; } 50%{ opacity:0.6; } }
 
 /* ── Person cards ── */
 .person-list { padding: 4px 0; }
@@ -209,6 +211,25 @@ body {
 .timeline-zone { font-size:11px; color:var(--gray-400); }
 .timeline-action .btn-tiny { padding:6px 8px; }
 .btn-send-now { background: var(--amber-light); color: var(--amber); border-color: transparent; }
+
+.avatar-wrap {
+  position: relative;
+  flex-shrink: 0;
+  width: 36px; height: 36px;
+}
+.avatar-wrap .avatar { width: 100%; height: 100%; }
+.overdue-badge {
+  position: absolute;
+  bottom: -4px; right: -6px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 9px; font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 8px;
+  white-space: nowrap;
+  line-height: 1.4;
+  pointer-events: none;
+}
 
 .avatar {
   width: 36px; height: 36px; border-radius: 50%;

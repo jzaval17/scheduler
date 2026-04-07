@@ -375,7 +375,9 @@ function renderBoard() {
     const max = ZONE_MAX[zone];
 
     if (pill) {
-      if (onBreak > max) { pill.textContent = `${onBreak}/${max} — over limit`; pill.className = 'zone-pill pill-danger'; }
+      const overdueCount = zp.filter(p => p.status === 'overdue').length;
+      if (overdueCount > 0) { pill.textContent = `${overdueCount} overdue!`; pill.className = 'zone-pill pill-overdue'; }
+      else if (onBreak > max) { pill.textContent = `${onBreak}/${max} — over limit`; pill.className = 'zone-pill pill-danger'; }
       else if (onBreak === max) { pill.textContent = `${onBreak}/${max} — at limit`; pill.className = 'zone-pill pill-warn'; }
       else { pill.textContent = `${onBreak}/${max} on break`; pill.className = 'zone-pill pill-ok'; }
     }
@@ -523,7 +525,13 @@ function renderBoard() {
         // Add an upbeat animation class when a break is actively running
         const animClass = (activeBreak && activeBreak.status === 'active') ? ' active-anim' : '';
         const soonClass = soonFlag ? ' soon' : '';
-        card.innerHTML = `<div class="avatar ${avClass}${animClass}">${initials(p.name)}</div><div class="person-info"><div class="person-name">${availHtml} ${p.name} ${takenHtml} ${lateHtml} ${absentHtml} ${clockOutHtml}</div>${breakBadges}${paidHtml}<div class="person-timer${p.status === 'overdue' ? ' overdue' : ''}">${timerText}</div>${noteHtml}${editorHtml}${actions}</div><span class="status-badge ${sbClass}">${sbLabel}</span>`;
+        const overdueMin = (activeBreak && activeBreak.status === 'overdue' && activeBreak.startMs)
+          ? Math.max(1, Math.floor((Date.now() - activeBreak.startMs) / 60000) - (activeBreak.dur || 15))
+          : 0;
+        const avatarHtml = overdueMin > 0
+          ? `<div class="avatar-wrap"><div class="avatar ${avClass}${animClass}">${initials(p.name)}</div><span class="overdue-badge">+${overdueMin}m</span></div>`
+          : `<div class="avatar ${avClass}${animClass}">${initials(p.name)}</div>`;
+        card.innerHTML = `${avatarHtml}<div class="person-info"><div class="person-name">${availHtml} ${p.name} ${takenHtml} ${lateHtml} ${absentHtml} ${clockOutHtml}</div>${breakBadges}${paidHtml}<div class="person-timer${p.status === 'overdue' ? ' overdue' : ''}">${timerText}</div>${noteHtml}${editorHtml}${actions}</div><span class="status-badge ${sbClass}">${sbLabel}</span>`;
         if (soonFlag) card.classList.add('soon');
         if (p.clockedOut) card.classList.add('clocked-out');
         card.onclick = () => openModal(p.id);
@@ -813,6 +821,16 @@ function startBreak(personId, type) {
   const p = people.find(x => x.id === personId);
   if (!p) return;
   const now = Date.now();
+  // Zone conflict warning: check if sending this person would leave their zone with 0 available
+  const zoneAvailable = people.filter(x =>
+    x.zone === p.zone && x.id !== p.id &&
+    !x.absent && !x.clockedOut &&
+    x.status !== 'not_here' && x.status !== 'break' && x.status !== 'lunch' && x.status !== 'overdue'
+  ).length;
+  if (zoneAvailable === 0) {
+    const zoneName = ZONE_LABELS[p.zone] || p.zone;
+    if (!confirm(`⚠️ ${zoneName} will have no one available if ${p.name} goes on ${type}.\n\nSend anyway?`)) return;
+  }
   // Find a scheduled break of this type to mark active; prefer nearest scheduled time
   if (!p.breaks) p.breaks = [];
   let target = null;
@@ -828,6 +846,11 @@ function startBreak(personId, type) {
   }
   target.status = 'active';
   target.startMs = now;
+  // When starting lunch, auto-mark the first scheduled break as done (assumed taken)
+  if (type === 'lunch') {
+    const pendingBreaks = p.breaks.filter(b => b.type === 'break' && b.status === 'scheduled').sort((a, b) => (a.scheduledMs || 0) - (b.scheduledMs || 0));
+    if (pendingBreaks.length > 0) pendingBreaks[0].status = 'done';
+  }
   p.status = type === 'lunch' ? 'lunch' : 'break';
   p.type = type; p.startMs = now;
   // Cancel any scheduled notification for this break since it's now active
@@ -1663,6 +1686,19 @@ restoreScheduledNotifications();
 setInterval(() => { tick(); checkPushNotifications(); }, 15000);
 updateClock();
 setInterval(updateClock, 10000);
+
+// ── Keep screen awake ──────────────────────────────────────────────────
+(function() {
+  async function requestWakeLock() {
+    if (!navigator.wakeLock) return;
+    try { await navigator.wakeLock.request('screen'); } catch(e) {}
+  }
+  requestWakeLock();
+  // Re-acquire after tab becomes visible again (wake lock is released on hide)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') requestWakeLock();
+  });
+})();
 
 function toggleShowOffline() {
   showOffline = !showOffline;
