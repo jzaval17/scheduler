@@ -20,8 +20,7 @@ let activeTab = 'board';
 let lastAction = null;
 let undoTimer = null;
 let inlineEditId = null;
-let inlineNoteDraft = '';
-let showOffline = true;
+let showOffline = localStorage.getItem('bm_show_offline') !== 'false';
 
 function loadState() {
   try {
@@ -503,12 +502,18 @@ function renderBoard() {
           editorHtml = `<div class="inline-editor"><textarea id="inline-note-${p.id}">${p.note||''}</textarea><div style="display:flex;flex-direction:column;gap:6px;"><button class="btn-primary" onclick="event.stopPropagation();saveInline('${p.id}')">Save</button><button class="btn-secondary" onclick="event.stopPropagation();cancelInline()">Cancel</button></div></div>`;
         }
 
-        const editActions = `<button class="btn-tiny" onclick="event.stopPropagation();openModal('${p.id}')">Edit breaks</button>`;
-        const clockOutBtn = (!p.clockedOut && (p.shouldClockOut || p.clockOutOverdue)) ? `<button class="btn-tiny" onclick="event.stopPropagation();manualClockOut('${p.id}')">Clock out</button>` : '';
-        // Add a quick-send button and a "Send now" prompt when upcoming soon
-        const quickSendBtn = `<button class="btn-tiny" onclick="event.stopPropagation();startBreak('${p.id}','break')">Send</button>`;
-        const sendNowBtn = soonFlag ? `<button class="btn-tiny btn-send-now" onclick="event.stopPropagation();startBreak('${p.id}','break')">Send now</button>` : '';
-        const actions = `<div style="display:flex;gap:6px;margin-top:8px">${quickSendBtn}${sendNowBtn}<button class="btn-tiny" onclick="event.stopPropagation();startInline('${p.id}')">Edit</button><button class="btn-tiny" onclick="event.stopPropagation();toggleLate('${p.id}')">${p.late? 'Clear late':'Late'}</button><button class="btn-tiny" onclick="event.stopPropagation();toggleAbsent('${p.id}')">${p.absent? 'Clear absent':'Absent'}</button>${clockOutBtn}${(next && next.scheduledMs && next.scheduledMs <= Date.now())?`<button class="btn-tiny" onclick="event.stopPropagation();markBreakDone('${p.id}')">Mark taken</button>`:''}${editActions}</div>`;
+        const editActions = `<button class="btn-tiny" onclick="event.stopPropagation();openModal('${p.id}')">Edit</button>`;
+        const clockOutBtn = (!p.clockedOut && (p.shouldClockOut || p.clockOutOverdue)) ? `<button class="btn-tiny btn-warn" onclick="event.stopPropagation();manualClockOut('${p.id}')">Clock out</button>` : '';
+        // Core quick actions only — late/absent/note moved into modal
+        let primaryBtn = '';
+        if (isActive(p)) {
+          primaryBtn = `<button class="btn-tiny btn-ok" onclick="event.stopPropagation();markReturned('${p.id}')">Returned</button>`;
+        } else if (next && next.scheduledMs && next.scheduledMs <= Date.now()) {
+          primaryBtn = `<button class="btn-tiny btn-warn" onclick="event.stopPropagation();markBreakDone('${p.id}')">Mark taken</button>`;
+        } else if (p.status === 'available') {
+          primaryBtn = `<button class="btn-tiny" onclick="event.stopPropagation();startBreak('${p.id}','break')">Send break</button>`;
+        }
+        const actions = `<div class="card-actions">${primaryBtn}${clockOutBtn}${editActions}</div>`;
 
         // Add an upbeat animation class when a break is actively running
         const animClass = (activeBreak && activeBreak.status === 'active') ? ' active-anim' : '';
@@ -630,6 +635,9 @@ function renderAlerts() {
   const el = document.getElementById('alerts-inner');
   if (!el) return;
   alerts = alerts.filter(a => Date.now() - a.ts < 60*60000);
+  // Cap completed (ok) entries so they don't pile up
+  const okEntries = alerts.filter(a => a.type === 'ok').slice(0, 20);
+  alerts = [...alerts.filter(a => a.type !== 'ok'), ...okEntries];
 
   const liveAlerts = [];
   const activeCount = people.filter(p => isActive(p)).length;
@@ -737,7 +745,8 @@ function openModal(personId) {
   av.className = 'modal-avatar ' + avClass;
   av.textContent = initials(p.name);
   nm.textContent = p.name;
-  sub.textContent = ZONE_LABELS[p.zone] + ' · ' + (p.type === 'break' ? `${BREAK_DUR['break']}-min break` : `${BREAK_DUR['lunch']}-min lunch`);
+  const typeLabel = p.type === 'lunch' ? `${BREAK_DUR['lunch']}-min lunch` : p.type === 'break' ? `${BREAK_DUR['break']}-min break` : 'Team member';
+  sub.textContent = ZONE_LABELS[p.zone] + ' · ' + typeLabel;
   const elapsed = getElapsedMin(p);
   const dur = getDur(p);
   const remaining = dur - elapsed;
@@ -1402,18 +1411,43 @@ function showToast(msg) {
 
 // ── PWA + Notifications ───────────────────────────────────────────────
 if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js').catch(() => {}); }
+
 function requestNotificationPermission() {
-  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission().catch(() => {});
+  }
 }
+
 function sendPushNotification(title, body) {
-  if ('Notification' in window && Notification.permission === 'granted')
-    new Notification(title, { body, icon: '/icons/icon-192.png' });
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try { new Notification(title, { body, icon: '/icons/icon-192.png' }); } catch(e) {}
+  }
 }
+
+// Persist notifiedPush so we don't re-fire on page reload
 let notifiedPush = new Set();
-let scheduledTriggers = new Set(); // track break ids we've tried to schedule via SW
-// Persistent scheduled notifications (fallbacks when SW scheduling not supported)
+try {
+  const saved = localStorage.getItem('bm_notified_push');
+  if (saved) notifiedPush = new Set(JSON.parse(saved));
+} catch(e) {}
+
+function saveNotifiedPush() {
+  try {
+    // Only persist entries from the last 12 hours to avoid stale entries
+    const cutoff = Date.now() - 12 * 3600000;
+    const valid = Array.from(notifiedPush).filter(k => {
+      const ts = Number(k.split('|')[1]);
+      return !ts || ts > cutoff;
+    });
+    localStorage.setItem('bm_notified_push', JSON.stringify(valid));
+    notifiedPush = new Set(valid);
+  } catch(e) {}
+}
+
+// Client-side scheduled notifications only (no SW TimestampTrigger — unsupported in all browsers)
 const scheduledNotifications = new Map(); // tag -> { title, body, tag, time, data }
-const scheduledTimeouts = new Map(); // tag -> timeoutId
+const scheduledTimeouts = new Map();      // tag -> timeoutId
+let scheduledTriggers = new Set();        // break ids we've already scheduled
 
 function saveScheduledNotifications() {
   try { localStorage.setItem('bm_scheduled_notifications', JSON.stringify(Array.from(scheduledNotifications.entries()))); } catch(e){}
@@ -1424,7 +1458,10 @@ function restoreScheduledNotifications() {
     const raw = localStorage.getItem('bm_scheduled_notifications');
     if (!raw) return;
     const arr = JSON.parse(raw);
+    const now = Date.now();
     arr.forEach(([tag, obj]) => {
+      // Skip already-past notifications
+      if (!obj || !obj.time || Number(obj.time) < now) return;
       scheduledNotifications.set(tag, obj);
       scheduleClientFallback(obj);
     });
@@ -1432,33 +1469,28 @@ function restoreScheduledNotifications() {
 }
 
 function scheduleClientFallback(obj) {
-  // obj: { title, body, tag, time, data }
   try {
     if (!obj || !obj.tag) return;
     const now = Date.now();
-    // clear existing timeout if present
     if (scheduledTimeouts.has(obj.tag)) {
       clearTimeout(scheduledTimeouts.get(obj.tag));
       scheduledTimeouts.delete(obj.tag);
     }
     const delay = Math.max(0, (Number(obj.time) || now) - now);
+    // Don't schedule if it would fire in less than 60 seconds (likely already stale)
+    if (delay < 60000 && obj.time < now) return;
     const tid = setTimeout(() => {
       try {
-        // Only notify if permission granted and recipient still present and not absent/clocked out
         if (Notification.permission === 'granted') {
-          // double-check person still eligible
           const personId = obj.data && obj.data.personId;
           const p = people.find(x => x.id === personId);
           if (!p || p.absent || p.clockedOut || p.status === 'not_here') {
-            // cancel
-            cancelScheduledNotification(obj.tag);
-            return;
+            cancelScheduledNotification(obj.tag); return;
           }
           sendPushNotification(obj.title, obj.body);
-          pushAlert({ id: obj.tag, type: 'info', msg: obj.body, personId: personId });
+          pushAlert({ id: obj.tag, type: 'info', msg: obj.body, personId });
         }
       } catch (e) {}
-      // cleanup after firing
       cancelScheduledNotification(obj.tag);
     }, delay);
     scheduledTimeouts.set(obj.tag, tid);
@@ -1470,7 +1502,6 @@ function cancelScheduledNotification(tag) {
     if (!tag) return;
     if (scheduledTimeouts.has(tag)) { clearTimeout(scheduledTimeouts.get(tag)); scheduledTimeouts.delete(tag); }
     if (scheduledNotifications.has(tag)) { scheduledNotifications.delete(tag); saveScheduledNotifications(); }
-    // also remove from scheduledTriggers set if present
     if (scheduledTriggers.has(tag)) scheduledTriggers.delete(tag);
   } catch(e) {}
 }
@@ -1480,115 +1511,102 @@ function cancelScheduledNotificationsForPerson(personId) {
     for (const [tag, obj] of Array.from(scheduledNotifications.entries())) {
       if (obj && obj.data && obj.data.personId === personId) cancelScheduledNotification(tag);
     }
+    // Also remove from notifiedPush for this person so they can get fresh notifications
+    notifiedPush.forEach(k => { if (k.includes(personId)) notifiedPush.delete(k); });
   } catch(e) {}
 }
+
 function checkPushNotifications() {
-  if (!('Notification' in window)) return;
-  // Notify for active/overdue breaks
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+
+  const now = Date.now();
   people.forEach(p => {
-    if (p.absent || p.clockedOut || p.status === 'not_here') return; // do not notify for absent, clocked-out, or not-yet-started team members
-    // overdue break
+    if (p.absent || p.clockedOut || p.status === 'not_here') return;
+
+    // Overdue break notification (fires once per overdue event)
     if (p.status === 'overdue') {
-      const key = 'overdue:' + p.id;
-      if (!notifiedPush.has(key) && Notification.permission === 'granted') {
+      const key = `overdue:${p.id}`;
+      if (!notifiedPush.has(key)) {
         notifiedPush.add(key);
+        saveNotifiedPush();
         sendPushNotification('Break overdue!', `${p.name} needs to return — ${ZONE_LABELS[p.zone]}`);
       }
     }
-    // clock-out overdue (shift ended but still on break/lunch)
+
+    // Clock-out overdue
     if (p.clockOutOverdue) {
-      const key = 'clockout:' + p.id;
-      if (!notifiedPush.has(key) && Notification.permission === 'granted') {
+      const key = `clockout:${p.id}`;
+      if (!notifiedPush.has(key)) {
         notifiedPush.add(key);
-        sendPushNotification('Shift ended — clock out', `${p.name} still on break after shift end — ${ZONE_LABELS[p.zone]}`);
+        saveNotifiedPush();
+        sendPushNotification('Shift ended — clock out', `${p.name} is still on break after shift end`);
       }
     }
-    // scheduled breaks/lunches that are due now (scheduledMs <= now and still 'scheduled')
+
+    // Schedule future break notifications using client-side setTimeout only
     if (p.breaks && p.breaks.length > 0) {
-      const now = Date.now();
       p.breaks.forEach(b => {
-        if (b.status === 'scheduled' && b.scheduledMs && b.scheduledMs <= now) {
-          const key = 'due:' + b.id;
-          if (!notifiedPush.has(key) && Notification.permission === 'granted') {
+        if (b.status !== 'scheduled' || !b.scheduledMs) return;
+
+        if (b.scheduledMs <= now) {
+          // Break is due now — fire immediately (once)
+          const key = `due:${b.id}`;
+          if (!notifiedPush.has(key)) {
             notifiedPush.add(key);
+            saveNotifiedPush();
             const title = b.type === 'lunch' ? 'Lunch due' : 'Break due';
             sendPushNotification(title, `${p.name}'s ${b.type} is due — ${ZONE_LABELS[p.zone]}`);
             pushAlert({ id: key, type: 'info', msg: `${p.name}'s ${b.type} is due — ${ZONE_LABELS[p.zone]}`, personId: p.id });
           }
-        }
-        // Attempt to schedule a service-worker-triggered notification for future scheduled breaks
-        else if (b.status === 'scheduled' && b.scheduledMs && b.scheduledMs > now) {
-          const key = 'trigger:' + b.id;
-          if (!scheduledTriggers.has(key) && Notification.permission === 'granted' && 'serviceWorker' in navigator) {
-            try {
-              navigator.serviceWorker.ready.then(reg => {
-                if (!reg) return;
-                // Send a message to the service worker to schedule the notification from inside the SW.
-                try {
-                  reg.active?.postMessage({
-                    type: 'scheduleNotification',
-                    title: b.type === 'lunch' ? 'Lunch due' : 'Break due',
-                    body: `${p.name}'s ${b.type} is due — ${ZONE_LABELS[p.zone]}`,
-                    tag: key,
-                    time: b.scheduledMs,
-                    data: { personId: p.id, breakId: b.id }
-                  });
-                  // Persist and also schedule a client-side fallback
-                  const obj = { title: b.type === 'lunch' ? 'Lunch due' : 'Break due', body: `${p.name}'s ${b.type} is due — ${ZONE_LABELS[p.zone]}`, tag: key, time: b.scheduledMs, data: { personId: p.id, breakId: b.id } };
-                  scheduledNotifications.set(key, obj);
-                  saveScheduledNotifications();
-                  scheduleClientFallback(obj);
-                  scheduledTriggers.add(key);
-                } catch (e) {}
-              }).catch(() => {});
-            } catch (e) {}
+        } else {
+          // Future break — schedule a client-side timeout (once per break)
+          const key = `trigger:${b.id}`;
+          if (!scheduledTriggers.has(key)) {
+            scheduledTriggers.add(key);
+            const obj = {
+              title: b.type === 'lunch' ? 'Lunch due' : 'Break due',
+              body: `${p.name}'s ${b.type} is due — ${ZONE_LABELS[p.zone]}`,
+              tag: key, time: b.scheduledMs,
+              data: { personId: p.id, breakId: b.id }
+            };
+            scheduledNotifications.set(key, obj);
+            saveScheduledNotifications();
+            scheduleClientFallback(obj);
           }
         }
       });
     }
   });
 
-  // Cleanup notifiedPush entries when condition clears or person removed
+  // Clean up stale notifiedPush entries when the condition clears
   notifiedPush.forEach(key => {
     const [type, id] = key.split(':');
     if (type === 'due') {
-      // id is break id; find the person that has this break
       let found = false;
       for (const p of people) {
         const b = (p.breaks || []).find(x => x.id === id);
-        if (b) {
-          found = true;
-          if (b.status !== 'scheduled' || !(b.scheduledMs && b.scheduledMs <= Date.now())) notifiedPush.delete(key);
-          break;
-        }
+        if (b) { found = true; if (b.status !== 'scheduled') notifiedPush.delete(key); break; }
       }
       if (!found) notifiedPush.delete(key);
-      return;
+    } else if (type === 'overdue') {
+      const p = people.find(x => x.id === id);
+      if (!p || p.status !== 'overdue') notifiedPush.delete(key);
+    } else if (type === 'clockout') {
+      const p = people.find(x => x.id === id);
+      if (!p || !p.clockOutOverdue) notifiedPush.delete(key);
     }
-    // for other types, id is person id
-    const p = people.find(x => x.id === id);
-    if (!p) { notifiedPush.delete(key); return; }
-    if (type === 'overdue' && p.status !== 'overdue') notifiedPush.delete(key);
-    if (type === 'clockout' && !p.clockOutOverdue) notifiedPush.delete(key);
   });
-  // Cleanup scheduledTriggers when the break/person no longer exists or condition changed
+
+  // Clean up scheduledTriggers when the break is done/cancelled/removed
   scheduledTriggers.forEach(key => {
     const id = key.split(':')[1];
     let found = false;
     for (const p of people) {
       const b = (p.breaks || []).find(x => x.id === id);
-      if (b) {
-        found = true;
-        if (!(b.status === 'scheduled' && b.scheduledMs && b.scheduledMs > Date.now())) scheduledTriggers.delete(key);
-        break;
-      }
+      if (b) { found = true; if (b.status !== 'scheduled') { cancelScheduledNotification(key); } break; }
     }
-    if (!found) scheduledTriggers.delete(key);
+    if (!found) cancelScheduledNotification(key);
   });
-  // If notifications aren't granted, optionally request once
-  if (Notification.permission === 'default') {
-    Notification.requestPermission().catch(() => {});
-  }
 }
 
 // Manual refresh triggered by user
@@ -1596,9 +1614,8 @@ function manualRefresh() {
   try { document.getElementById('refresh-btn')?.classList.add('pulse'); } catch(e){}
   showToast('Refreshing...');
   loadState();
-  render();
-  // run an immediate tick and notification check to update UI quickly
-  try { tick(); checkPushNotifications(); } catch(e){}
+  // tick() calls render() internally — no need for a separate render() call
+  try { tick(); checkPushNotifications(); } catch(e){ render(); }
   setTimeout(() => { try { document.getElementById('refresh-btn')?.classList.remove('pulse'); } catch(e){} }, 800);
 }
 
@@ -1626,6 +1643,13 @@ function dumpState() {
 // ── Init ──────────────────────────────────────────────────────────────
 loadState();
 requestNotificationPermission();
+// Sync toggle-offline button to persisted state
+(function() {
+  const btn = document.getElementById('toggle-offline-btn');
+  const lbl = document.getElementById('toggle-offline-label');
+  if (btn) btn.classList.toggle('active', !showOffline);
+  if (lbl) lbl.textContent = showOffline ? 'Hide offline' : 'Show offline';
+})();
 render();
 // Restore any previously scheduled notifications (client-side fallbacks)
 restoreScheduledNotifications();
@@ -1633,35 +1657,61 @@ setInterval(() => { tick(); checkPushNotifications(); }, 15000);
 updateClock();
 setInterval(updateClock, 10000);
 
-// UI: control to hide/show absent & clocked-out people to reduce board clutter
 function toggleShowOffline() {
   showOffline = !showOffline;
+  try { localStorage.setItem('bm_show_offline', String(showOffline)); } catch(e) {}
   const btn = document.getElementById('toggle-offline-btn');
-  if (btn) btn.classList.toggle('active', showOffline === false);
-  showToast(showOffline ? 'Showing offline people' : 'Hiding offline people');
+  const lbl = document.getElementById('toggle-offline-label');
+  if (btn) btn.classList.toggle('active', !showOffline);
+  if (lbl) lbl.textContent = showOffline ? 'Hide offline' : 'Show offline';
+  showToast(showOffline ? 'Showing all team members' : 'Hiding clocked out & absent');
   render();
 }
 
-// Render a compact shift timeline: upcoming scheduled breaks across whole shift
+// Render a compact shift timeline: upcoming scheduled breaks across the shift
 function renderShiftTimeline() {
   const el = document.getElementById('shift-timeline');
   if (!el) return;
   const now = Date.now();
   const upcoming = [];
   people.forEach(p => {
+    if (p.absent || p.clockedOut) return;
     if (!p.breaks) return;
     p.breaks.forEach(b => {
-      // Only show scheduled or active breaks that are relevant
-      if (b.status === 'scheduled' && b.scheduledMs && b.scheduledMs > now) upcoming.push({ p, b });
+      if (b.status === 'scheduled' && b.scheduledMs && b.scheduledMs > now) {
+        upcoming.push({ p, b });
+      }
     });
   });
   upcoming.sort((a, b) => a.b.scheduledMs - b.b.scheduledMs);
-  const items = upcoming.slice(0, 12).map(x => {
+  const shown = upcoming.slice(0, 10);
+
+  if (shown.length === 0) {
+    el.innerHTML = '';
+    return;
+  }
+
+  const items = shown.map(x => {
     const mins = Math.max(0, Math.round((x.b.scheduledMs - now) / 60000));
-    const time = x.b.scheduledMs ? fmtTime(x.b.scheduledMs) : (x.b.scheduledTime || '—');
+    const time = fmtTime(x.b.scheduledMs);
     const cls = x.b.type === 'lunch' ? 'tl-lunch' : 'tl-break';
-    return `<div class="timeline-item ${cls}"><div class="timeline-time">${time}</div><div class="timeline-name">${escapeHtml(x.p.name)}</div><div class="timeline-zone">${ZONE_LABELS[x.p.zone]}</div><div class="timeline-action"><button class="btn-tiny" onclick="event.stopPropagation();startBreak('${x.p.id}','${x.b.type}');return false;">Send</button></div></div>`;
+    const soonCls = mins <= 15 ? ' soon' : '';
+    const minsLabel = mins === 0 ? 'now' : `${mins}m`;
+    return `<div class="timeline-item ${cls}">
+      <div class="timeline-time">${time}</div>
+      <div class="timeline-name">${escapeHtml(x.p.name)}</div>
+      <div class="timeline-zone">${ZONE_LABELS[x.p.zone]}</div>
+      <span class="timeline-mins${soonCls}">${minsLabel}</span>
+      <div class="timeline-action"><button class="btn-tiny" onclick="event.stopPropagation();startBreak('${x.p.id}','${x.b.type}');return false;">Send</button></div>
+    </div>`;
   }).join('');
-  el.innerHTML = `<div class="timeline-wrap">${items || '<div class="empty-small">No upcoming breaks</div>'}</div>`;
+
+  el.innerHTML = `<div class="timeline-wrap">
+    <div class="timeline-header">
+      <span class="timeline-header-title">Up next</span>
+      <span class="timeline-header-count">${shown.length} break${shown.length !== 1 ? 's' : ''} scheduled</span>
+    </div>
+    ${items}
+  </div>`;
 }
 

@@ -607,7 +607,132 @@ body {
 .parsed-row-main { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .auto-tag { background: #F59E0B; color: #fff; font-size: 10px; padding: 1px 5px; border-radius: 4px; font-weight: 600; vertical-align: middle; margin-left: 4px; }
 
+/* ── Board filter row ── */
+.board-filters {
+  display: flex;
+  gap: 8px;
+  padding: 0 0 8px;
+  flex-wrap: wrap;
+}
+.filter-chip {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--gray-200);
+  background: #fff;
+  color: var(--gray-600);
+  cursor: pointer;
+  font-family: var(--font);
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.filter-chip:hover { background: var(--gray-100); }
+.filter-chip.active {
+  background: var(--gray-800);
+  color: #fff;
+  border-color: var(--gray-800);
+}
+
+/* ── Card actions (simplified) ── */
+.card-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.btn-ok {
+  background: var(--green-light) !important;
+  color: var(--green) !important;
+  border-color: transparent !important;
+  font-weight: 600 !important;
+}
+.btn-warn {
+  background: var(--amber-light) !important;
+  color: var(--amber) !important;
+  border-color: transparent !important;
+  font-weight: 600 !important;
+}
+
+/* ── Shift timeline strip ── */
+.timeline-section {
+  margin-bottom: 10px;
+}
+.timeline-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: #fff;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+.timeline-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--gray-100);
+  background: var(--gray-50);
+}
+.timeline-header-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gray-600);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.timeline-header-count {
+  font-size: 11px;
+  color: var(--gray-400);
+}
+.timeline-item {
+  display: flex;
+  align-items: center;
+  padding: 9px 14px;
+  gap: 10px;
+  border-bottom: 1px solid var(--gray-100);
+  transition: background 0.1s;
+}
+.timeline-item:last-child { border-bottom: none; }
+.timeline-item.tl-break { border-left: 3px solid #EF9F27; }
+.timeline-item.tl-lunch { border-left: 3px solid #378ADD; }
+.timeline-time {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gray-800);
+  font-family: var(--font-mono);
+  min-width: 60px;
+}
+.timeline-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--gray-800);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.timeline-zone {
+  font-size: 11px;
+  color: var(--gray-400);
+  min-width: 70px;
+  text-align: right;
+}
+.timeline-action { flex-shrink: 0; }
+.timeline-mins {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 7px;
+  border-radius: 20px;
+  background: var(--gray-100);
+  color: var(--gray-600);
+  margin-right: 6px;
+}
+.timeline-mins.soon { background: var(--amber-light); color: var(--amber); }
+
 .hidden { display: none !important; }
+
 
 /* ── Upcoming card (coverage) ── */
 .upcoming-card {
