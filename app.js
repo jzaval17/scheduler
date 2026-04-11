@@ -406,7 +406,10 @@ function renderBoard() {
         if (am && !bm) return -1;
         if (!am && bm) return 1;
       }
-      return (a.name || '').localeCompare(b.name || '');
+      // Within same status group, sort by shift start time (earliest = came in first)
+      const aStart = a.shiftStartMs || 0;
+      const bStart = b.shiftStartMs || 0;
+      return aStart - bStart;
     }).forEach(p => {
       // If hiding offline, skip absent/clocked-out persons in the board list
       if (!showOffline && (p.absent || p.clockedOut)) return;
@@ -466,21 +469,23 @@ function renderBoard() {
       const takenHtml = '';
       const lateHtml = p.late ? '<span class="person-flag late">Late</span>' : '';
       const absentHtml = p.absent ? '<span class="person-flag absent">Absent</span>' : '';
-      let clockOutHtml = '';
-      if (p.clockOutOverdue) clockOutHtml = '<span class="person-flag absent">Overtime</span>';
-      else if (p.shouldClockOut) clockOutHtml = '<span class="person-flag late">Clock out</span>';
+      const clockOutHtml = '';
       // Availability sign: always show, with color variant based on current status
       let availClass = 'avail-available';
       if (p.status === 'break') availClass = 'avail-break';
       else if (p.status === 'lunch') availClass = 'avail-lunch';
       else if (p.status === 'overdue') availClass = 'avail-overdue';
       else if (p.status === 'not_here') availClass = 'avail-not-here';
-      // Display proper availability label: absent or on break/lunch/overdue/not here are unavailable
+      // Display proper availability label
       let availLabel = 'Available';
       if (p.absent) { availLabel = 'Unavailable'; availClass = 'avail-absent'; }
-      else if (p.status === 'break' || p.status === 'lunch' || p.status === 'overdue') { availLabel = 'Unavailable'; }
+      else if (p.status === 'overdue') { availLabel = `Overdue — ${p.type === 'lunch' ? 'lunch' : 'break'}`; }
+      else if (p.status === 'break') { availLabel = 'On break'; }
+      else if (p.status === 'lunch') { availLabel = 'On lunch'; }
       else if (p.status === 'not_here') { availLabel = 'Not here'; }
       else if (p.status === 'clocked_out') { availLabel = 'Clocked out'; availClass = 'avail-not-here'; }
+      else if (p.clockOutOverdue) { availLabel = 'Overtime!'; availClass = 'avail-overdue'; }
+      else if (p.shouldClockOut) { availLabel = 'Clock out'; availClass = 'avail-break'; }
       const availHtml = `<span class="avail-sign ${availClass}">${availLabel}</span>`;
       const shiftLine = (p.shiftStartMs && p.shiftEndMs) ? `${fmtTime(p.shiftStartMs)} — ${fmtTime(p.shiftEndMs)}` : '';
       const paid = computePaidHours(p);
