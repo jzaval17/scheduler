@@ -234,6 +234,7 @@ body {
   line-height: 1.4;
   pointer-events: none;
 }
+.missed-badge { right: auto; left: -6px; }
 
 .avatar {
   width: 36px; height: 36px; border-radius: 50%;

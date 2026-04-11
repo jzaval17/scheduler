@@ -549,9 +549,14 @@ function renderBoard() {
         const overdueMin = (activeBreak && activeBreak.status === 'overdue' && activeBreak.startMs)
           ? Math.max(1, Math.floor((Date.now() - activeBreak.startMs) / 60000) - (activeBreak.dur || 15))
           : 0;
+        const missedMin = (missedBreak && next && next.scheduledMs)
+          ? Math.max(1, Math.round((Date.now() - next.scheduledMs) / 60000))
+          : 0;
         const avatarHtml = overdueMin > 0
           ? `<div class="avatar-wrap"><div class="avatar ${avClass}${animClass}">${initials(p.name)}</div><span class="overdue-badge">+${overdueMin}m</span></div>`
-          : `<div class="avatar ${avClass}${animClass}">${initials(p.name)}</div>`;
+          : missedMin > 0
+            ? `<div class="avatar-wrap"><div class="avatar av-overdue${animClass}">${initials(p.name)}</div><span class="overdue-badge missed-badge">${next.type === 'lunch' ? 'Lunch' : 'Break'} +${missedMin}m</span></div>`
+            : `<div class="avatar ${avClass}${animClass}">${initials(p.name)}</div>`;
         card.innerHTML = `${avatarHtml}<div class="person-info"><div class="person-name">${availHtml} ${p.name} ${takenHtml} ${lateHtml} ${absentHtml} ${clockOutHtml}</div>${shiftBarHtml}${breakBadges}${paidHtml}<div class="person-timer${p.status === 'overdue' ? ' overdue' : ''}">${timerText}</div>${noteHtml}${editorHtml}${actions}</div><span class="status-badge ${sbClass}">${sbLabel}</span>`;
         if (soonFlag) card.classList.add('soon');
         if (p.clockedOut) card.classList.add('clocked-out');
