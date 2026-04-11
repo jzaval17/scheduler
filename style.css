@@ -102,8 +102,8 @@ body {
   text-align: center;
   border: 1px solid var(--gray-200);
 }
-.stat-num { font-size: 22px; font-weight: 600; color: var(--gray-800); font-family: var(--font-mono); }
-.stat-label { font-size: 10px; color: var(--gray-400); margin-top: 2px; font-weight: 500; letter-spacing: 0.03em; }
+.stat-num { font-size: 24px; font-weight: 700; color: var(--gray-800); font-family: var(--font-mono); }
+.stat-label { font-size: 11px; color: var(--gray-600); margin-top: 2px; font-weight: 600; letter-spacing: 0.03em; }
 .stat-warn .stat-num { color: var(--amber); }
 .stat-danger .stat-num { color: var(--danger); }
 .stat-info .stat-num { color: var(--blue); }
@@ -159,9 +159,14 @@ body {
   background: #fff;
   border-radius: var(--r-lg);
   border: 1px solid var(--gray-200);
+  border-left: 4px solid var(--gray-300);
   margin-bottom: 10px;
   overflow: hidden;
 }
+#zone-checklanes-group { border-left-color: var(--red); }
+#zone-sco-group        { border-left-color: var(--blue); }
+#zone-service-group    { border-left-color: var(--green); }
+#zone-driveup-group    { border-left-color: var(--amber); }
 .zone-header {
   padding: 10px 14px;
   display: flex;
@@ -170,7 +175,7 @@ body {
   border-bottom: 1px solid var(--gray-100);
   background: var(--gray-50);
 }
-.zone-name { font-size: 12px; font-weight: 600; color: var(--gray-600); letter-spacing: 0.05em; text-transform: uppercase; }
+.zone-name { font-size: 13px; font-weight: 700; color: var(--gray-800); letter-spacing: 0.04em; text-transform: uppercase; }
 .zone-pill {
   font-size: 11px;
   padding: 2px 8px;
@@ -196,10 +201,10 @@ body {
 }
 .person-card:last-child { border-bottom: none; }
 .person-card:hover, .person-card:active { background: var(--gray-50); }
-.person-card.overdue { background: var(--danger-light); }
-.person-card.overdue:hover { background: #FFCDD2; }
-.person-card.missed-break { background: var(--danger-light); border-left: 3px solid var(--danger); }
-.person-card.missed-break:hover { background: #FFCDD2; }
+.person-card.overdue { background: #FFCDD2; border-left: 4px solid var(--danger); }
+.person-card.overdue:hover { background: #FFBCBC; }
+.person-card.missed-break { background: #FFCDD2; border-left: 4px solid var(--danger); }
+.person-card.missed-break:hover { background: #FFBCBC; }
 
 /* Grey out unavailable people */
 .person-card.clocked-out { opacity: 0.45; filter: grayscale(0.4); }
@@ -282,6 +287,7 @@ body {
 .inline-editor { display:flex; gap:8px; margin-top:6px; }
 .inline-editor textarea { flex:1; min-height:44px; padding:6px; border-radius:8px; border:1px solid var(--gray-200); }
 .note-toggle { font-size: 12px; margin-left: 6px; color: var(--red); cursor: pointer; text-decoration: underline; }
+.note-collapsed { margin-left: 0; margin-top: 4px; display: inline-block; }
 .person-detail { font-size: 12px; color: var(--gray-400); margin-top: 1px; }
 .person-timer { font-size: 12px; color: var(--gray-400); margin-top: 1px; font-family: var(--font-mono); }
 .person-timer.overdue { color: var(--danger); font-weight: 600; }
@@ -507,7 +513,7 @@ body {
 .alert-ts { font-size: 11px; color: var(--gray-400); margin-top: 3px; }
 .alert-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .btn-tiny {
-  font-size: 12px; padding: 4px 10px;
+  font-size: 12px; padding: 7px 12px; min-height: 34px;
   border: 1px solid var(--gray-200); border-radius: 20px;
   background: transparent; color: var(--gray-600);
   cursor: pointer; font-family: var(--font); transition: background 0.12s;

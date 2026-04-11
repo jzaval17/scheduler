@@ -390,7 +390,7 @@ function renderBoard() {
     }
 
     const order = { available: 0, overdue: 1, break: 2, lunch: 3, not_here: 4 };
-    const hasMissed = p => !!(p.breaks && p.status !== 'not_here' && p.breaks.some(b => b.status === 'scheduled' && b.scheduledMs && b.scheduledMs <= Date.now()));
+    const hasMissed = p => !!(p.breaks && p.status === 'available' && p.breaks.some(b => b.status === 'scheduled' && b.scheduledMs && b.scheduledMs <= Date.now()));
     [...zp].sort((a, b) => {
       // Absent and clocked out always at the very bottom
       if (a.absent && !b.absent) return 1;
@@ -512,17 +512,13 @@ function renderBoard() {
       const missedBreak = hasMissed(p);
       const card = document.createElement('div');
       card.className = 'person-card' + (p.status === 'overdue' ? ' overdue' : '') + (missedBreak ? ' missed-break' : '');
-        // Note display or inline editor
+        // Note display or inline editor — collapsed by default, expand only when noteExpanded
         let noteHtml = '';
         if (p.note) {
-          const full = escapeHtml(p.note);
-          if (full.length <= NOTE_PREVIEW_LEN) {
-            noteHtml = `<div class="inline-note">${full}</div>`;
-          } else if (p.noteExpanded) {
-            noteHtml = `<div class="inline-note">${full} <a class="note-toggle" href="#" onclick="event.stopPropagation();toggleNoteExpand('${p.id}');return false;">Show less</a></div>`;
+          if (p.noteExpanded) {
+            noteHtml = `<div class="inline-note">${escapeHtml(p.note)} <a class="note-toggle" href="#" onclick="event.stopPropagation();toggleNoteExpand('${p.id}');return false;">Hide</a></div>`;
           } else {
-            const preview = full.slice(0, NOTE_PREVIEW_LEN) + '…';
-            noteHtml = `<div class="inline-note">${preview} <a class="note-toggle" href="#" onclick="event.stopPropagation();toggleNoteExpand('${p.id}');return false;">Show more</a></div>`;
+            noteHtml = `<a class="note-toggle note-collapsed" href="#" onclick="event.stopPropagation();toggleNoteExpand('${p.id}');return false;">📝 Note</a>`;
           }
         }
         let editorHtml = '';
@@ -531,7 +527,7 @@ function renderBoard() {
         }
 
         const editActions = `<button class="btn-tiny" onclick="event.stopPropagation();openModal('${p.id}')">Edit</button>`;
-        const clockOutBtn = (!p.clockedOut && !p.absent && (p.status === 'available' || p.shouldClockOut || p.clockOutOverdue)) ? `<button class="btn-tiny btn-warn" onclick="event.stopPropagation();manualClockOut('${p.id}')">Clock out</button>` : '';
+        const clockOutBtn = (!p.clockedOut && !p.absent && !isActive(p) && (p.status === 'available' || p.shouldClockOut || p.clockOutOverdue)) ? `<button class="btn-tiny btn-warn" onclick="event.stopPropagation();manualClockOut('${p.id}')">Clock out</button>` : '';
         // Core quick actions only — late/absent/note moved into modal
         let primaryBtn = '';
         if (isActive(p)) {
@@ -807,8 +803,8 @@ function openModal(personId) {
   } else {
     actionsHtml += `<div class="modal-action-row"><button class="modal-btn mark-back" onclick="markReturned('${p.id}');closeModal()">Mark returned</button></div>`;
   }
-  // Offer manual clock-out when available on shift or when shift has ended
-  if (!p.clockedOut && !p.absent && (p.status === 'available' || p.shouldClockOut || p.clockOutOverdue)) {
+  // Offer manual clock-out when available on shift or when shift has ended (not while on break)
+  if (!p.clockedOut && !p.absent && !isActive(p) && (p.status === 'available' || p.shouldClockOut || p.clockOutOverdue)) {
     actionsHtml += `<div class="modal-action-row"><button class="modal-btn ok" onclick="manualClockOut('${p.id}');closeModal()">Clock out</button></div>`;
   }
   if (hasDue) {
@@ -939,6 +935,10 @@ function saveBreakEdits(personId) {
 function manualClockOut(personId) {
   const p = people.find(x => x.id === personId);
   if (!p) return;
+  if (isActive(p)) {
+    if (!confirm(`${p.name} is still on ${p.type}. Mark them returned first, then clock out?`)) return;
+    markReturned(personId);
+  }
   p.clockedOut = true;
   p.shouldClockOut = false;
   p.clockOutOverdue = false;
@@ -1137,6 +1137,8 @@ function addManual() {
     breaks.forEach(b => {
       if (!b.date) return;
       const scheduledMs = b.date.getTime();
+      // Skip if an identical break (same type + time) already exists
+      if (existing.breaks.find(eb => eb.scheduledMs === scheduledMs && eb.type === b.type)) return;
       const scheduledTime = b.date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
       existing.breaks.push({ id: uid(), type: b.type, scheduledMs, scheduledTime, status: 'scheduled', startMs: null, dur: b.dur || (b.type === 'lunch' ? BREAK_DUR['lunch'] : 15) });
       created++;
@@ -1415,14 +1417,27 @@ function importSchedule() {
     if (times.length > 0) {
       const min = Math.min(...times);
       const max = Math.max(...times);
-      // assume ~2 hours padding before first and after last scheduled break
       shiftStartMs = Math.max(0, min - 2 * 3600000);
       shiftEndMs = max + 2 * 3600000;
     }
-    const person = { id: uid(), name: v.name, zone: v.zone, role: '', breaks: v.breaks, status: 'available', startMs: null, shiftStartMs, shiftEndMs };
-    syncPersonStatus(person);
-    people.push(person);
-    created.push(person);
+    // Merge into existing person with same name+zone rather than creating a duplicate
+    const existing = people.find(p => p.name === v.name && p.zone === v.zone);
+    if (existing) {
+      v.breaks.forEach(b => {
+        if (!existing.breaks.find(eb => eb.scheduledMs === b.scheduledMs && eb.type === b.type)) {
+          existing.breaks.push(b);
+        }
+      });
+      if (shiftStartMs && !existing.shiftStartMs) existing.shiftStartMs = shiftStartMs;
+      if (shiftEndMs && !existing.shiftEndMs) existing.shiftEndMs = shiftEndMs;
+      syncPersonStatus(existing);
+      created.push(existing);
+    } else {
+      const person = { id: uid(), name: v.name, zone: v.zone, role: '', breaks: v.breaks, status: 'available', startMs: null, shiftStartMs, shiftEndMs };
+      syncPersonStatus(person);
+      people.push(person);
+      created.push(person);
+    }
   });
 
   saveState();
