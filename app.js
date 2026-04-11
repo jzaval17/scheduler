@@ -389,17 +389,24 @@ function renderBoard() {
       list.appendChild(em); return;
     }
 
-    const order = { overdue: 0, break: 1, lunch: 2, available: 3, not_here: 4 };
+    const order = { available: 0, overdue: 1, break: 2, lunch: 3, not_here: 4 };
+    const hasMissed = p => !!(p.breaks && p.status !== 'not_here' && p.breaks.some(b => b.status === 'scheduled' && b.scheduledMs && b.scheduledMs <= Date.now()));
     [...zp].sort((a, b) => {
-      // Absent and clocked out should appear at the bottom
+      // Absent and clocked out always at the very bottom
       if (a.absent && !b.absent) return 1;
       if (!a.absent && b.absent) return -1;
       if (a.clockedOut && !b.clockedOut) return 1;
       if (!a.clockedOut && b.clockedOut) return -1;
-      const oa = order[a.status] ?? 3;
-      const ob = order[b.status] ?? 3;
-      if (oa === ob) return (a.name || '').localeCompare(b.name || '');
-      return oa - ob;
+      const oa = order[a.status] ?? 0;
+      const ob = order[b.status] ?? 0;
+      if (oa !== ob) return oa - ob;
+      // Within available, missed-break people sort first
+      if (a.status === 'available') {
+        const am = hasMissed(a), bm = hasMissed(b);
+        if (am && !bm) return -1;
+        if (!am && bm) return 1;
+      }
+      return (a.name || '').localeCompare(b.name || '');
     }).forEach(p => {
       // If hiding offline, skip absent/clocked-out persons in the board list
       if (!showOffline && (p.absent || p.clockedOut)) return;
@@ -436,7 +443,13 @@ function renderBoard() {
       // If person is available, show next scheduled time or mark 'due soon' when within UPCOMING_SOON_MS
       if (!activeBreak && p.status === 'available' && next && next.scheduledMs) {
         const delta = next.scheduledMs - Date.now();
-        if (delta > 0 && delta <= UPCOMING_SOON_MS) {
+        if (delta <= 0) {
+          // Scheduled time has already passed — missed break
+          const overMin = Math.round(Math.abs(delta) / 60000);
+          sbClass = 'sb-overdue';
+          sbLabel = `${next.type === 'lunch' ? 'Lunch' : 'Break'} overdue`;
+          timerText = overMin > 0 ? `${next.type === 'lunch' ? 'Lunch' : 'Break'} overdue by ${overMin}m` : `${next.type === 'lunch' ? 'Lunch' : 'Break'} due now`;
+        } else if (delta <= UPCOMING_SOON_MS) {
           const mins = Math.max(1, Math.round(delta / 60000));
           sbClass = 'sb-soon';
           sbLabel = `${next.type === 'lunch' ? 'Lunch' : 'Break'} due in ${mins}m`;
@@ -496,8 +509,9 @@ function renderBoard() {
         breakBadges = `<div class="break-dots" aria-hidden="true">${dots}</div>`;
       }
 
+      const missedBreak = hasMissed(p);
       const card = document.createElement('div');
-      card.className = 'person-card' + (p.status === 'overdue' ? ' overdue' : '');
+      card.className = 'person-card' + (p.status === 'overdue' ? ' overdue' : '') + (missedBreak ? ' missed-break' : '');
         // Note display or inline editor
         let noteHtml = '';
         if (p.note) {

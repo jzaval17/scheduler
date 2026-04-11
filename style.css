@@ -198,6 +198,8 @@ body {
 .person-card:hover, .person-card:active { background: var(--gray-50); }
 .person-card.overdue { background: var(--danger-light); }
 .person-card.overdue:hover { background: #FFCDD2; }
+.person-card.missed-break { background: var(--danger-light); border-left: 3px solid var(--danger); }
+.person-card.missed-break:hover { background: #FFCDD2; }
 
 /* Grey out unavailable people */
 .person-card.clocked-out { opacity: 0.45; filter: grayscale(0.4); }
@@ -476,7 +478,7 @@ body {
   border: 1px solid var(--gray-200); border-radius: var(--r-sm);
   font-size: 14px; font-family: var(--font); color: var(--gray-800);
   background: #fff; outline: none; transition: border-color 0.15s;
-  -webkit-appearance: none;
+  -webkit-appearance: none; appearance: none;
 }
 .form-input:focus, .form-select:focus { border-color: var(--red); box-shadow: 0 0 0 3px rgba(204,0,0,0.08); }
 .form-row .form-input, .form-row .form-select { flex: 1; }
