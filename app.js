@@ -566,6 +566,19 @@ function renderBoard() {
         card.onclick = () => openModal(p.id);
       list.appendChild(card);
     });
+
+    // Coverage tip: if anyone in this zone is on break/lunch, suggest who should cover
+    const onBreakPeople = zp.filter(p => isActive(p) && !p.absent);
+    const available = zp.filter(p => p.status === 'available' && !p.absent && !p.clockedOut)
+      .sort((a, b) => (a.shiftStartMs || 0) - (b.shiftStartMs || 0));
+    if (onBreakPeople.length > 0 && available.length > 0) {
+      const coverPerson = available[0];
+      const outNames = onBreakPeople.map(p => p.name.split(' ')[0]).join(' & ');
+      const tip = document.createElement('div');
+      tip.className = 'coverage-tip';
+      tip.innerHTML = `<span class="coverage-tip-icon">💡</span><span>Ask <strong>${coverPerson.name}</strong> to cover while ${outNames} is on ${onBreakPeople[0].type || 'break'}</span>`;
+      list.appendChild(tip);
+    }
   });
 }
 
@@ -839,6 +852,7 @@ function openModal(personId) {
     <div class="modal-info-row"><span class="modal-info-label">Break started</span><span class="modal-info-value">${p.startMs?fmtTime(p.startMs):'—'}</span></div>
     <div class="modal-info-row"><span class="modal-info-label">Time remaining</span><span class="modal-info-value">${isActive(p)?(remaining>0?remaining+' min':'Overdue by '+Math.abs(remaining)+' min'):'—'}</span></div>
     <div style="margin-top:10px"><h4 style="margin:0 0 6px 0">Edit breaks</h4>${breaksHtml || '<div class="empty-small">No scheduled breaks</div>'}<div style="margin-top:8px"><button class="modal-btn" onclick="saveBreakEdits('${p.id}');closeModal()">Save breaks</button></div></div>
+    <div style="margin-top:12px;padding:10px;background:var(--gray-50);border-radius:var(--r-sm);border:1px solid var(--gray-200)"><div style="font-size:12px;font-weight:600;color:var(--gray-600);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.04em">Extend shift</div><div style="display:flex;gap:8px;align-items:center"><label style="font-size:12px;color:var(--gray-400);white-space:nowrap">New end time</label><input type="time" id="modal-extend-time" class="form-input" style="flex:1" value="${p.shiftEndMs ? new Date(p.shiftEndMs).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}) : ''}"><button class="modal-btn" onclick="extendShift('${p.id}')">Extend &amp; adjust breaks</button></div></div>
     <div style="margin-top:10px"><label style="display:block;font-size:12px;color:var(--gray-400);margin-bottom:6px">Note</label><textarea id="modal-note" class="modal-note">${p.note || ''}</textarea></div>
     <div style="display:flex;gap:8px;margin-top:8px;"><button class="modal-btn" onclick="saveNote('${p.id}');closeModal()">Save note</button><button class="modal-btn" onclick="toggleLate('${p.id}');closeModal()">${p.late? 'Clear late':'Mark late'}</button><button class="modal-btn" onclick="toggleAbsent('${p.id}');closeModal()">${p.absent? 'Clear absent':'Mark absent'}</button></div>`;
   overlay.classList.remove('hidden');
@@ -898,6 +912,50 @@ function saveNote(personId) {
   p.note = el.value.trim();
   saveState();
   showToast('Note saved');
+  render();
+}
+
+// ── Extend shift + auto-add breaks ────────────────────────────────────
+function extendShift(personId) {
+  const p = people.find(x => x.id === personId);
+  if (!p) return;
+  const input = document.getElementById('modal-extend-time');
+  if (!input || !input.value) { showToast('Enter a new end time'); return; }
+  const [h, m] = input.value.split(':').map(Number);
+  const newEnd = new Date(); newEnd.setHours(h, m, 0, 0);
+  const newEndMs = newEnd.getTime();
+  if (!p.shiftStartMs) { showToast('No shift start time — set it in Edit breaks first'); return; }
+  if (newEndMs <= p.shiftStartMs) { showToast('End time must be after shift start'); return; }
+  if (p.shiftEndMs && newEndMs <= p.shiftEndMs) { showToast('New end time must be later than current end time'); return; }
+
+  p.shiftEndMs = newEndMs;
+  const durHours = (newEndMs - p.shiftStartMs) / 3600000;
+  if (!p.breaks) p.breaks = [];
+
+  // Count existing scheduled/active breaks by type
+  const existingBreaks = p.breaks.filter(b => b.status !== 'done');
+  const breakCount = existingBreaks.filter(b => b.type === 'break').length;
+  const hasLunch   = existingBreaks.some(b => b.type === 'lunch');
+  let added = 0;
+
+  const pushBreak = (type, timeMs, dur) => {
+    if (p.breaks.find(b => b.scheduledMs === timeMs && b.type === type)) return;
+    p.breaks.push({ id: uid(), type, scheduledMs: timeMs, scheduledTime: fmtTime(timeMs), status: 'scheduled', startMs: null, dur });
+    added++;
+  };
+
+  if (durHours >= 2  && breakCount < 1) pushBreak('break', p.shiftStartMs + 2 * 3600000, 15);
+  if (durHours > 5   && !hasLunch)      pushBreak('lunch', Math.round((p.shiftStartMs + newEndMs) / 2), BREAK_DUR['lunch']);
+  if (durHours > 6   && breakCount < 2) pushBreak('break', p.shiftStartMs + 6 * 3600000, 15);
+  if (durHours > 8   && breakCount < 3) pushBreak('break', p.shiftStartMs + 8 * 3600000, 15);
+
+  syncPersonStatus(p);
+  saveState();
+  const msg = added > 0
+    ? `${p.name} extended to ${fmtTime(newEndMs)} · ${added} break${added > 1 ? 's' : ''} added`
+    : `${p.name}'s shift extended to ${fmtTime(newEndMs)}`;
+  showToast(msg);
+  closeModal();
   render();
 }
 

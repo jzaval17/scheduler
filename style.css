@@ -347,6 +347,19 @@ body {
 .sb-soon { background: #FFF8E1; color: var(--amber); font-weight: 800; border: 1px solid rgba(230,81,0,0.08); }
 .person-card.soon { box-shadow: 0 2px 10px rgba(230,81,0,0.06); border-left: 4px solid var(--amber); }
 
+/* ── Coverage tip ── */
+.coverage-tip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  background: #FFFDE7;
+  border-top: 1px solid #FFF9C4;
+  font-size: 13px;
+  color: var(--gray-800);
+}
+.coverage-tip-icon { font-size: 15px; flex-shrink: 0; }
+
 /* ── Empty state ── */
 .empty-state {
   text-align: center;
