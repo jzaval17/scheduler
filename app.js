@@ -567,17 +567,50 @@ function renderBoard() {
       list.appendChild(card);
     });
 
-    // Coverage tip: if anyone in this zone is on break/lunch, suggest who should cover
+    // Coverage tip: active break → suggest cover now; upcoming break → suggest proactive cover
+    const nowMs = Date.now();
     const onBreakPeople = zp.filter(p => isActive(p) && !p.absent);
     const available = zp.filter(p => p.status === 'available' && !p.absent && !p.clockedOut)
       .sort((a, b) => (a.shiftStartMs || 0) - (b.shiftStartMs || 0));
+
     if (onBreakPeople.length > 0 && available.length > 0) {
+      // Someone is actively on break — suggest cover right now
       const coverPerson = available[0];
       const outNames = onBreakPeople.map(p => p.name.split(' ')[0]).join(' & ');
       const tip = document.createElement('div');
       tip.className = 'coverage-tip';
       tip.innerHTML = `<span class="coverage-tip-icon">💡</span><span>Ask <strong>${coverPerson.name}</strong> to cover while ${outNames} is on ${onBreakPeople[0].type || 'break'}</span>`;
       list.appendChild(tip);
+    } else if (onBreakPeople.length === 0) {
+      // No one on break yet — find next upcoming break in this zone within 2 hours
+      const nextUp = zp
+        .filter(p => !p.absent && !p.clockedOut && p.breaks)
+        .flatMap(p => p.breaks
+          .filter(b => b.status === 'scheduled' && b.scheduledMs && b.scheduledMs > nowMs && b.scheduledMs - nowMs <= 2 * 3600000)
+          .map(b => ({ person: p, b }))
+        )
+        .sort((a, b) => a.b.scheduledMs - b.b.scheduledMs)[0];
+
+      if (nextUp && available.length > 0) {
+        // Find best cover: available at break time, no conflicting break
+        const bStart = nextUp.b.scheduledMs;
+        const bEnd = bStart + (nextUp.b.dur || 15) * 60000;
+        const coverCandidates = available.filter(x => {
+          if (x.id === nextUp.person.id) return false;
+          if (x.shiftEndMs && x.shiftEndMs < bStart) return false;
+          const conflict = x.breaks && x.breaks.some(xb =>
+            xb.status !== 'done' && xb.scheduledMs && xb.scheduledMs < bEnd && (xb.scheduledMs + (xb.dur || 15) * 60000) > bStart
+          );
+          return !conflict;
+        });
+        if (coverCandidates.length > 0) {
+          const minsUntil = Math.round((bStart - nowMs) / 60000);
+          const tip = document.createElement('div');
+          tip.className = 'coverage-tip coverage-tip-upcoming';
+          tip.innerHTML = `<span class="coverage-tip-icon">💡</span><span><strong>${nextUp.person.name.split(' ')[0]}</strong>'s ${nextUp.b.type} is in ${minsUntil}m — ask <strong>${coverCandidates[0].name}</strong> to cover</span>`;
+          list.appendChild(tip);
+        }
+      }
     }
   });
 }
@@ -687,6 +720,62 @@ function renderCoverage() {
           return `<div class="upcoming-card"><div class="avatar av-break">${initials(x.p.name)}</div><div class="person-info"><div class="person-name">${x.p.name}</div><div class="person-detail">${ZONE_LABELS[x.p.zone]} — ${x.next.type === 'break' ? `${BREAK_DUR['break']}-min break` : `${BREAK_DUR['lunch']}-min lunch`}</div></div><span class="status-badge sb-upcoming">in ${minsUntil}m</span></div>`;
         }).join('');
   }
+  renderCoveragePlan();
+}
+
+// ── Full-shift coverage plan ───────────────────────────────────────────
+function buildCoveragePlan() {
+  const allBreaks = [];
+  people.forEach(p => {
+    if (!p.breaks || p.absent || p.clockedOut) return;
+    p.breaks.forEach(b => {
+      if (b.status === 'done' || !b.scheduledMs) return;
+      allBreaks.push({ person: p, b });
+    });
+  });
+  allBreaks.sort((a, b) => a.b.scheduledMs - b.b.scheduledMs);
+
+  return allBreaks.map(({ person: p, b }) => {
+    const bStart = b.scheduledMs;
+    const bEnd = bStart + (b.dur || 15) * 60000;
+    // Candidates: same zone, shift overlaps break time, no conflicting own break
+    const candidates = people.filter(x => {
+      if (x.id === p.id || x.absent || x.clockedOut) return false;
+      if (x.zone !== p.zone) return false;
+      if (x.shiftStartMs && x.shiftStartMs > bStart) return false;
+      if (x.shiftEndMs && x.shiftEndMs < bStart) return false;
+      const conflict = x.breaks && x.breaks.some(xb => {
+        if (xb.status === 'done' || !xb.scheduledMs) return false;
+        return xb.scheduledMs < bEnd && (xb.scheduledMs + (xb.dur || 15) * 60000) > bStart;
+      });
+      return !conflict;
+    }).sort((a, b) => (a.shiftStartMs || 0) - (b.shiftStartMs || 0));
+    return { person: p, b, cover: candidates[0] || null };
+  });
+}
+
+function renderCoveragePlan() {
+  const el = document.getElementById('coverage-plan-list');
+  if (!el) return;
+  const plan = buildCoveragePlan();
+  if (plan.length === 0) { el.innerHTML = '<div class="empty-small">No scheduled breaks to plan.</div>'; return; }
+  const now = Date.now();
+  el.innerHTML = plan.map(({ person: p, b, cover }) => {
+    const isPast = b.status === 'active' || (b.scheduledMs && b.scheduledMs <= now);
+    const typeLabel = b.type === 'lunch' ? 'Lunch' : 'Break';
+    const typeCls  = b.type === 'lunch' ? 'plan-lunch' : 'plan-break';
+    const statusCls = b.status === 'active' ? ' plan-active' : (isPast ? ' plan-past' : '');
+    const coverHtml = cover
+      ? `<span class="plan-cover">→ <strong>${cover.name}</strong> covers</span>`
+      : `<span class="plan-cover plan-no-cover">→ No cover available</span>`;
+    return `<div class="plan-row${statusCls}">
+      <span class="plan-time">${fmtTime(b.scheduledMs)}</span>
+      <span class="plan-badge ${typeCls}">${typeLabel}</span>
+      <span class="plan-name">${escapeHtml(p.name)}</span>
+      <span class="plan-zone">${ZONE_LABELS[p.zone]}</span>
+      ${coverHtml}
+    </div>`;
+  }).join('');
 }
 
 function renderAlerts() {

@@ -347,6 +347,24 @@ body {
 .sb-soon { background: #FFF8E1; color: var(--amber); font-weight: 800; border: 1px solid rgba(230,81,0,0.08); }
 .person-card.soon { box-shadow: 0 2px 10px rgba(230,81,0,0.06); border-left: 4px solid var(--amber); }
 
+/* ── Coverage plan (full shift) ── */
+.cov-plan-sub { font-size: 12px; color: var(--gray-400); margin-bottom: 10px; }
+.plan-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 0; border-bottom: 1px solid var(--gray-100); font-size: 13px;
+}
+.plan-row:last-child { border-bottom: none; }
+.plan-row.plan-active { background: var(--amber-light); border-radius: 6px; padding: 8px 6px; }
+.plan-row.plan-past   { opacity: 0.45; }
+.plan-time  { font-family: var(--font-mono); font-weight: 600; font-size: 12px; width: 54px; flex-shrink: 0; }
+.plan-badge { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 10px; flex-shrink: 0; }
+.plan-break { background: var(--amber-light); color: var(--amber); }
+.plan-lunch { background: var(--blue-light); color: var(--blue); }
+.plan-name  { font-weight: 600; flex: 1; min-width: 80px; }
+.plan-zone  { font-size: 11px; color: var(--gray-400); }
+.plan-cover { font-size: 12px; color: var(--green); margin-left: auto; }
+.plan-no-cover { color: var(--danger); }
+
 /* ── Coverage tip ── */
 .coverage-tip {
   display: flex;
@@ -359,6 +377,7 @@ body {
   color: var(--gray-800);
 }
 .coverage-tip-icon { font-size: 15px; flex-shrink: 0; }
+.coverage-tip-upcoming { background: #F3F4F6; border-top-color: var(--gray-200); color: var(--gray-600); }
 
 /* ── Empty state ── */
 .empty-state {
