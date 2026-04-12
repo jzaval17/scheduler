@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Break Manager">
-  <title>Target Break Manager</title>
+  <title>Break Manager — Bakersfield Panama &amp; Gosford</title>
   <link rel="manifest" href="/manifest.json">
   <link rel="apple-touch-icon" href="/icons/icon-192.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -29,7 +29,10 @@
             <circle cx="11" cy="11" r="2.5" fill="#fff"/>
           </svg>
         </div>
-        <span class="topbar-title">Break Manager</span>
+        <div class="topbar-title-group">
+          <span class="topbar-title">Break Manager</span>
+          <span class="topbar-store">Panama &amp; Gosford</span>
+        </div>
       </div>
       <div class="topbar-right">
         <button id="notif-btn" class="notif-btn hidden" onclick="switchTab('alerts')" aria-label="Show alerts">
@@ -139,6 +142,7 @@
         <div class="cov-header">
           <span class="cov-title">Total on break</span>
           <span class="cov-badge" id="cov-total-badge">0 / 0</span>
+          <span id="peak-indicator" class="peak-badge peak-low">● Low traffic</span>
         </div>
         <div class="bar-track">
           <div class="bar-fill" id="cov-bar"></div>

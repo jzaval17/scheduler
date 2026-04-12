@@ -5,13 +5,37 @@ const ZONE_LABELS = { checklanes: 'Checklanes', sco: 'SCO', service: 'Service De
 // For each zone, ordered list of donor zones to try when no same-zone cover exists.
 // Checklanes can draw from DriveUp/Service when those zones have surplus staff.
 const CROSS_ZONE_DONORS = {
-  sco:        ['checklanes'],
-  service:    ['checklanes'],
-  driveup:    ['checklanes'],
+  // SCO is small — any zone with surplus can cover, in priority order
+  sco:        ['checklanes', 'driveup', 'service'],
+  service:    ['checklanes', 'driveup'],
+  driveup:    ['checklanes', 'service'],
+  // Checklanes can draw from DriveUp/Service when those zones have surplus
   checklanes: ['driveup', 'service'],
 };
-// Minimum staff that must remain in a zone before it can donate a cover to another zone
-const ZONE_MIN_STAFF = { checklanes: 2, sco: 1, service: 1, driveup: 2 };
+// Peak hour schedule based on Target foot traffic research (weekday = Mon–Fri, weekend = Sat–Sun).
+// Adjust start/end values to match your store's specific patterns.
+const PEAK_SCHEDULE = {
+  weekday: [
+    { start: 0,  end: 10, level: 'low' },
+    { start: 10, end: 12, level: 'moderate' },
+    { start: 12, end: 14, level: 'high' },      // weekday lunch rush
+    { start: 14, end: 16, level: 'moderate' },
+    { start: 16, end: 19, level: 'high' },      // after-work rush
+    { start: 19, end: 24, level: 'low' },
+  ],
+  weekend: [
+    { start: 0,  end: 11, level: 'low' },
+    { start: 11, end: 20, level: 'high' },      // sustained peak all afternoon
+    { start: 20, end: 24, level: 'moderate' },
+  ],
+};
+// Min staff per zone per traffic level — floors rise during peak so fewer people
+// are available for cross-zone donation and breaks are harder to give away.
+const ZONE_MIN_STAFF_BY_PEAK = {
+  low:      { checklanes: 2, sco: 1, service: 1, driveup: 2 },
+  moderate: { checklanes: 3, sco: 1, service: 1, driveup: 2 },
+  high:     { checklanes: 4, sco: 2, service: 1, driveup: 3 },
+};
 const BREAK_DUR = { break: 15, lunch: 45, lunch60: 60 };
 const LUNCH_WARN_MIN = 10; // minutes before the 5-hour mark to warn about lunch
 const NOTE_PREVIEW_LEN = 120;
@@ -122,6 +146,20 @@ function fmtTime(ms) {
   return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 function uid() { return Date.now() + Math.random().toString(36).slice(2, 7); }
+
+// Returns 'low' | 'moderate' | 'high' for any given timestamp (defaults to now).
+function getPeakLevel(atMs) {
+  const d = new Date(atMs != null ? atMs : Date.now());
+  const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+  const hour = d.getHours() + d.getMinutes() / 60;
+  const schedule = PEAK_SCHEDULE[isWeekend ? 'weekend' : 'weekday'];
+  const slot = schedule.find(s => hour >= s.start && hour < s.end);
+  return (slot && slot.level) || 'low';
+}
+// How many staff a zone must keep before it can donate a cover elsewhere, at a given time.
+function getEffectiveMinStaff(zone, atMs) {
+  return (ZONE_MIN_STAFF_BY_PEAK[getPeakLevel(atMs)] || ZONE_MIN_STAFF_BY_PEAK.low)[zone] || 1;
+}
 
 // Helpers for new data model: people have `breaks` array. Each break: { id, type, scheduledMs, scheduledTime, status: 'scheduled'|'active'|'overdue'|'done', startMs, dur }
 function syncPersonStatus(person) {
@@ -577,6 +615,17 @@ function renderBoard() {
       list.appendChild(card);
     });
 
+    // Peak-hour warning strip — shown per zone when traffic is high
+    if (getPeakLevel() === 'high') {
+      const peakWarn = document.createElement('div');
+      peakWarn.className = 'peak-zone-warn';
+      peakWarn.innerHTML = `<span>⚠</span> Peak hours — hold full coverage, delay non-urgent breaks`;
+      list.appendChild(peakWarn);
+    }
+
+    // Checklanes is self-covering — lanes close when someone's on break, no dedicated cover needed
+    if (zone === 'checklanes') return;
+
     // Coverage tip: active break → suggest cover now; upcoming break → suggest proactive cover
     const nowMs = Date.now();
     const onBreakPeople = zp.filter(p => isActive(p) && !p.absent);
@@ -592,7 +641,7 @@ function renderBoard() {
           .filter(x => x.zone === donorZone && x.status === 'available' && !x.absent && !x.clockedOut)
           .sort((a, b) => (a.shiftStartMs || 0) - (b.shiftStartMs || 0));
         // Donor zone must have surplus above its minimum required staff to donate
-        if (donorAvail.length <= (ZONE_MIN_STAFF[donorZone] || 1)) continue;
+        if (donorAvail.length <= getEffectiveMinStaff(donorZone, null)) continue;
         const candidate = donorAvail.find(x => {
           if (x.id === excludeId) return false;
           if (bStart && x.shiftEndMs && x.shiftEndMs < bStart) return false;
@@ -737,6 +786,15 @@ function renderCoverage() {
   if (bar) { bar.style.width = Math.min(pct, 100) + '%'; bar.className = 'bar-fill ' + bfill; }
   if (pctLbl) pctLbl.textContent = `${pct}% — ${label}`;
 
+  // Peak level indicator
+  const peakEl = document.getElementById('peak-indicator');
+  if (peakEl) {
+    const level = getPeakLevel();
+    const PEAK_LABELS = { low: '● Low traffic', moderate: '● Moderate', high: '⚠ Peak hours' };
+    peakEl.textContent = PEAK_LABELS[level] || level;
+    peakEl.className = 'peak-badge peak-' + level;
+  }
+
   Object.keys(ZONE_MAX).forEach(zone => {
     const onBreak = people.filter(p => p.zone === zone && isActive(p)).length;
     const total = people.filter(p => p.zone === zone && !p.absent && !p.clockedOut).length;
@@ -775,6 +833,7 @@ function buildCoveragePlan() {
   const allBreaks = [];
   people.forEach(p => {
     if (!p.breaks || p.absent || p.clockedOut) return;
+    if (p.zone === 'checklanes') return; // checklanes is self-covering, no dedicated cover needed
     p.breaks.forEach(b => {
       if (b.status === 'done' || !b.scheduledMs) return;
       allBreaks.push({ person: p, b });
@@ -806,7 +865,8 @@ function buildCoveragePlan() {
         const donorCandidates = people.filter(x => x.zone === donorZone && isAvailableAt(x))
           .sort((a, b) => (a.shiftStartMs || 0) - (b.shiftStartMs || 0));
         // Only donate if donor zone has surplus above its minimum required staff at this time
-        if (donorCandidates.length > (ZONE_MIN_STAFF[donorZone] || 1)) {
+        // Use the peak-adjusted minimum for the time slot being planned
+        if (donorCandidates.length > getEffectiveMinStaff(donorZone, bStart)) {
           xZoneCover = donorCandidates[0];
           break;
         }

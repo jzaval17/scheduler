@@ -62,7 +62,9 @@ body {
 
 .topbar-left { display: flex; align-items: center; gap: 10px; }
 .target-logo { opacity: 0.95; }
+.topbar-title-group { display: flex; flex-direction: column; gap: 0; line-height: 1.1; }
 .topbar-title { font-size: 17px; font-weight: 600; letter-spacing: -0.3px; }
+.topbar-store { font-size: 10px; font-weight: 500; opacity: 0.75; letter-spacing: 0.02em; }
 .topbar-right { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
 .topbar-date { font-size: 10px; opacity: 0.7; font-weight: 500; letter-spacing: 0.03em; }
 .topbar-time { font-size: 14px; font-weight: 600; font-family: var(--font-mono); }
@@ -379,6 +381,16 @@ body {
 }
 .coverage-tip-icon { font-size: 15px; flex-shrink: 0; }
 .coverage-tip-upcoming { background: #F3F4F6; border-top-color: var(--gray-200); color: var(--gray-600); }
+/* ── Peak indicator ── */
+.peak-badge { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 10px; margin-left: auto; flex-shrink: 0; }
+.peak-low      { background: #E8F5E9; color: #2E7D32; }
+.peak-moderate { background: #FFF8E1; color: #E65100; }
+.peak-high     { background: #FFEBEE; color: #C62828; }
+.peak-zone-warn {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 14px; background: #FFEBEE; border-top: 1px solid #FFCDD2;
+  font-size: 12px; font-weight: 600; color: #C62828;
+}
 .coverage-tip-xzone { background: #FFF3E0; border-top-color: #FFE0B2; color: var(--gray-800); }
 .tip-xzone-label {
   display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 5px;
