@@ -2,6 +2,16 @@
 const ZONE_MAX = { checklanes: 10, sco: 2, service: 1, driveup: 5 };
 const TOTAL_ON_BREAK_MAX = 3; // overall max people on break before critical warning
 const ZONE_LABELS = { checklanes: 'Checklanes', sco: 'SCO', service: 'Service Desk', driveup: 'Drive Up' };
+// For each zone, ordered list of donor zones to try when no same-zone cover exists.
+// Checklanes can draw from DriveUp/Service when those zones have surplus staff.
+const CROSS_ZONE_DONORS = {
+  sco:        ['checklanes'],
+  service:    ['checklanes'],
+  driveup:    ['checklanes'],
+  checklanes: ['driveup', 'service'],
+};
+// Minimum staff that must remain in a zone before it can donate a cover to another zone
+const ZONE_MIN_STAFF = { checklanes: 2, sco: 1, service: 1, driveup: 2 };
 const BREAK_DUR = { break: 15, lunch: 45, lunch60: 60 };
 const LUNCH_WARN_MIN = 10; // minutes before the 5-hour mark to warn about lunch
 const NOTE_PREVIEW_LEN = 120;
@@ -573,14 +583,49 @@ function renderBoard() {
     const available = zp.filter(p => p.status === 'available' && !p.absent && !p.clockedOut)
       .sort((a, b) => (a.shiftStartMs || 0) - (b.shiftStartMs || 0));
 
-    if (onBreakPeople.length > 0 && available.length > 0) {
+    // Cross-zone fallback: find a donor from another zone respecting each zone's minimum staff
+    // Returns { candidate, donorZone } or null
+    const findXZoneCover = (excludeId, bStart, bEnd) => {
+      const donors = CROSS_ZONE_DONORS[zone] || [];
+      for (const donorZone of donors) {
+        const donorAvail = people
+          .filter(x => x.zone === donorZone && x.status === 'available' && !x.absent && !x.clockedOut)
+          .sort((a, b) => (a.shiftStartMs || 0) - (b.shiftStartMs || 0));
+        // Donor zone must have surplus above its minimum required staff to donate
+        if (donorAvail.length <= (ZONE_MIN_STAFF[donorZone] || 1)) continue;
+        const candidate = donorAvail.find(x => {
+          if (x.id === excludeId) return false;
+          if (bStart && x.shiftEndMs && x.shiftEndMs < bStart) return false;
+          if (bStart && bEnd) {
+            const conflict = x.breaks && x.breaks.some(xb =>
+              xb.status !== 'done' && xb.scheduledMs && xb.scheduledMs < bEnd && (xb.scheduledMs + (xb.dur || 15) * 60000) > bStart
+            );
+            if (conflict) return false;
+          }
+          return true;
+        });
+        if (candidate) return { candidate, donorZone };
+      }
+      return null;
+    };
+
+    const tipCoverName = (person, donorZone) =>
+      donorZone
+        ? `<strong>${person.name}</strong> <span class="tip-xzone-label">${ZONE_LABELS[donorZone]}</span>`
+        : `<strong>${person.name}</strong>`;
+
+    if (onBreakPeople.length > 0) {
       // Someone is actively on break — suggest cover right now
       const coverPerson = available[0];
-      const outNames = onBreakPeople.map(p => p.name.split(' ')[0]).join(' & ');
-      const tip = document.createElement('div');
-      tip.className = 'coverage-tip';
-      tip.innerHTML = `<span class="coverage-tip-icon">💡</span><span>Ask <strong>${coverPerson.name}</strong> to cover while ${outNames} is on ${onBreakPeople[0].type || 'break'}</span>`;
-      list.appendChild(tip);
+      const xResult = !coverPerson ? findXZoneCover(null, null, null) : null;
+      const finalCover = coverPerson || (xResult && xResult.candidate);
+      if (finalCover) {
+        const outNames = onBreakPeople.map(p => p.name.split(' ')[0]).join(' & ');
+        const tip = document.createElement('div');
+        tip.className = 'coverage-tip' + (xResult ? ' coverage-tip-xzone' : '');
+        tip.innerHTML = `<span class="coverage-tip-icon">💡</span><span>Ask ${tipCoverName(finalCover, xResult && xResult.donorZone)} to cover while ${outNames} is on ${onBreakPeople[0].type || 'break'}</span>`;
+        list.appendChild(tip);
+      }
     } else if (onBreakPeople.length === 0) {
       // No one on break yet — find next upcoming break in this zone within 2 hours
       const nextUp = zp
@@ -591,23 +636,25 @@ function renderBoard() {
         )
         .sort((a, b) => a.b.scheduledMs - b.b.scheduledMs)[0];
 
-      if (nextUp && available.length > 0) {
-        // Find best cover: available at break time, no conflicting break
+      if (nextUp) {
         const bStart = nextUp.b.scheduledMs;
         const bEnd = bStart + (nextUp.b.dur || 15) * 60000;
-        const coverCandidates = available.filter(x => {
+        const notConflict = x => {
           if (x.id === nextUp.person.id) return false;
           if (x.shiftEndMs && x.shiftEndMs < bStart) return false;
           const conflict = x.breaks && x.breaks.some(xb =>
             xb.status !== 'done' && xb.scheduledMs && xb.scheduledMs < bEnd && (xb.scheduledMs + (xb.dur || 15) * 60000) > bStart
           );
           return !conflict;
-        });
-        if (coverCandidates.length > 0) {
+        };
+        const sameCandidates = available.filter(notConflict);
+        const xResult = sameCandidates.length === 0 ? findXZoneCover(nextUp.person.id, bStart, bEnd) : null;
+        const bestCover = sameCandidates[0] || (xResult && xResult.candidate);
+        if (bestCover) {
           const minsUntil = Math.round((bStart - nowMs) / 60000);
           const tip = document.createElement('div');
-          tip.className = 'coverage-tip coverage-tip-upcoming';
-          tip.innerHTML = `<span class="coverage-tip-icon">💡</span><span><strong>${nextUp.person.name.split(' ')[0]}</strong>'s ${nextUp.b.type} is in ${minsUntil}m — ask <strong>${coverCandidates[0].name}</strong> to cover</span>`;
+          tip.className = 'coverage-tip coverage-tip-upcoming' + (xResult ? ' coverage-tip-xzone' : '');
+          tip.innerHTML = `<span class="coverage-tip-icon">💡</span><span><strong>${nextUp.person.name.split(' ')[0]}</strong>'s ${nextUp.b.type} is in ${minsUntil}m — ask ${tipCoverName(bestCover, xResult && xResult.donorZone)} to cover</span>`;
           list.appendChild(tip);
         }
       }
@@ -738,10 +785,8 @@ function buildCoveragePlan() {
   return allBreaks.map(({ person: p, b }) => {
     const bStart = b.scheduledMs;
     const bEnd = bStart + (b.dur || 15) * 60000;
-    // Candidates: same zone, shift overlaps break time, no conflicting own break
-    const candidates = people.filter(x => {
+    const isAvailableAt = x => {
       if (x.id === p.id || x.absent || x.clockedOut) return false;
-      if (x.zone !== p.zone) return false;
       if (x.shiftStartMs && x.shiftStartMs > bStart) return false;
       if (x.shiftEndMs && x.shiftEndMs < bStart) return false;
       const conflict = x.breaks && x.breaks.some(xb => {
@@ -749,24 +794,44 @@ function buildCoveragePlan() {
         return xb.scheduledMs < bEnd && (xb.scheduledMs + (xb.dur || 15) * 60000) > bStart;
       });
       return !conflict;
-    }).sort((a, b) => (a.shiftStartMs || 0) - (b.shiftStartMs || 0));
-    return { person: p, b, cover: candidates[0] || null };
+    };
+    // Same-zone candidates first
+    const sameZone = people.filter(x => x.zone === p.zone && isAvailableAt(x))
+      .sort((a, b) => (a.shiftStartMs || 0) - (b.shiftStartMs || 0));
+    // Cross-zone fallback: try donor zones in priority order, respecting each zone's minimum staff
+    let xZoneCover = null;
+    if (sameZone.length === 0) {
+      const donors = CROSS_ZONE_DONORS[p.zone] || [];
+      for (const donorZone of donors) {
+        const donorCandidates = people.filter(x => x.zone === donorZone && isAvailableAt(x))
+          .sort((a, b) => (a.shiftStartMs || 0) - (b.shiftStartMs || 0));
+        // Only donate if donor zone has surplus above its minimum required staff at this time
+        if (donorCandidates.length > (ZONE_MIN_STAFF[donorZone] || 1)) {
+          xZoneCover = donorCandidates[0];
+          break;
+        }
+      }
+    }
+    const cover = sameZone[0] || xZoneCover || null;
+    return { person: p, b, cover, crossZone: sameZone.length === 0 && !!xZoneCover };
   });
 }
 
 function renderCoveragePlan() {
   const el = document.getElementById('coverage-plan-list');
   if (!el) return;
+  // Remove existing plan rows but keep the sub-label div
+  el.querySelectorAll('.plan-row, .empty-small').forEach(n => n.remove());
   const plan = buildCoveragePlan();
-  if (plan.length === 0) { el.innerHTML = '<div class="empty-small">No scheduled breaks to plan.</div>'; return; }
+  if (plan.length === 0) { el.insertAdjacentHTML('beforeend', '<div class="empty-small">No scheduled breaks to plan.</div>'); return; }
   const now = Date.now();
-  el.innerHTML = plan.map(({ person: p, b, cover }) => {
+  el.insertAdjacentHTML('beforeend', plan.map(({ person: p, b, cover, crossZone }) => {
     const isPast = b.status === 'active' || (b.scheduledMs && b.scheduledMs <= now);
     const typeLabel = b.type === 'lunch' ? 'Lunch' : 'Break';
     const typeCls  = b.type === 'lunch' ? 'plan-lunch' : 'plan-break';
     const statusCls = b.status === 'active' ? ' plan-active' : (isPast ? ' plan-past' : '');
     const coverHtml = cover
-      ? `<span class="plan-cover">→ <strong>${cover.name}</strong> covers</span>`
+      ? `<span class="plan-cover${crossZone ? ' plan-cover-xzone' : ''}">→ <strong>${cover.name}</strong>${crossZone ? ` <span class="tip-xzone-label">${ZONE_LABELS[cover.zone]}</span>` : ''} covers</span>`
       : `<span class="plan-cover plan-no-cover">→ No cover available</span>`;
     return `<div class="plan-row${statusCls}">
       <span class="plan-time">${fmtTime(b.scheduledMs)}</span>
@@ -775,7 +840,7 @@ function renderCoveragePlan() {
       <span class="plan-zone">${ZONE_LABELS[p.zone]}</span>
       ${coverHtml}
     </div>`;
-  }).join('');
+  }).join(''));
 }
 
 function renderAlerts() {
@@ -1879,6 +1944,17 @@ requestNotificationPermission();
   if (lbl) lbl.textContent = showOffline ? 'Hide offline' : 'Show offline';
 })();
 render();
+// Restore collapsed state for coverage sections
+(function() {
+  ['upcoming', 'plan'].forEach(key => {
+    if (localStorage.getItem('bm_cov_' + key) === '1') {
+      const list = document.getElementById(key === 'upcoming' ? 'upcoming-list' : 'coverage-plan-list');
+      const chevron = document.getElementById('chevron-' + key);
+      if (list) list.classList.add('cov-collapsed');
+      if (chevron) chevron.textContent = '▸';
+    }
+  });
+})();
 // Restore any previously scheduled notifications (client-side fallbacks)
 restoreScheduledNotifications();
 setInterval(() => { tick(); checkPushNotifications(); }, 15000);
@@ -1897,6 +1973,15 @@ setInterval(updateClock, 10000);
     if (document.visibilityState === 'visible') requestWakeLock();
   });
 })();
+
+function toggleCovSection(key) {
+  const list = document.getElementById(key === 'upcoming' ? 'upcoming-list' : 'coverage-plan-list');
+  const chevron = document.getElementById('chevron-' + key);
+  if (!list) return;
+  const collapsed = list.classList.toggle('cov-collapsed');
+  if (chevron) chevron.textContent = collapsed ? '▸' : '▾';
+  try { localStorage.setItem('bm_cov_' + key, collapsed ? '1' : '0'); } catch(e) {}
+}
 
 function toggleShowOffline() {
   showOffline = !showOffline;

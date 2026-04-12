@@ -177,16 +177,21 @@
       </div>
 
       <div class="cov-section">
-        <div class="cov-section-label">Up next (next 20 min)</div>
-        <div id="upcoming-list">
+        <div class="cov-section-label cov-toggle" onclick="toggleCovSection('upcoming')" id="toggle-upcoming">
+          <span>Up next (next 20 min)</span><span class="cov-chevron" id="chevron-upcoming">▾</span>
+        </div>
+        <div id="upcoming-list" class="cov-collapsible">
           <div class="empty-small">No upcoming breaks scheduled in the next 20 minutes.</div>
         </div>
       </div>
 
       <div class="cov-section">
-        <div class="cov-section-label">Full shift coverage plan</div>
-        <div class="cov-plan-sub">Who covers who for every break &amp; lunch today</div>
-        <div id="coverage-plan-list"></div>
+        <div class="cov-section-label cov-toggle" onclick="toggleCovSection('plan')" id="toggle-plan">
+          <span>Full shift coverage plan</span><span class="cov-chevron" id="chevron-plan">▾</span>
+        </div>
+        <div id="coverage-plan-list" class="cov-collapsible">
+          <div class="cov-plan-sub">Who covers who for every break &amp; lunch today</div>
+        </div>
       </div>
     </section>
 
