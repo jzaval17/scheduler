@@ -572,6 +572,13 @@ body {
   cursor: pointer; font-family: var(--font); transition: background 0.12s;
 }
 .btn-tiny:hover { background: var(--gray-100); }
+.btn-undo { color: var(--amber); border-color: var(--amber); }
+.btn-undo:hover { background: var(--amber-light); }
+.modal-break-status { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px; vertical-align: middle; }
+.modal-break-status.done     { background: #E8F5E9; color: #2E7D32; }
+.modal-break-status.active   { background: var(--amber-light); color: var(--amber); }
+.modal-break-status.overdue  { background: var(--danger-light); color: var(--danger); }
+.modal-break-status.sched    { background: var(--gray-100); color: var(--gray-500); }
 
 /* ── Buttons ── */
 .btn-primary {

@@ -1044,9 +1044,19 @@ function openModal(personId) {
   }
   actionsHtml += `<div class="modal-action-row"><button class="modal-btn remove" onclick="removePerson('${p.id}');closeModal()">Remove</button></div>`;
   // Build editable break rows for this person
-  const breaksHtml = (p.breaks || []).map(b => {
+  const breaksHtml = (p.breaks || []).slice().sort((a, b) => (a.scheduledMs || 0) - (b.scheduledMs || 0)).map((b, i, arr) => {
     const tval = b.scheduledTime || (b.scheduledMs ? fmtTime(b.scheduledMs) : '');
-    return `<div class="modal-break-row" style="display:flex;gap:8px;align-items:center;margin-top:8px"><div style="flex:1"><strong>${b.type.charAt(0).toUpperCase()+b.type.slice(1)}</strong><div style="font-size:12px;color:var(--gray-400)">Current: ${tval}</div></div><div style="width:42%"><input id="modal-break-time-${b.id}" class="form-input" value="${tval}"></div><div style="width:26%"><input id="modal-break-dur-${b.id}" class="form-input" value="${b.dur || (b.type==='lunch'?BREAK_DUR['lunch']:15)}"></div><div><button class="btn-tiny" onclick="event.stopPropagation();removeBreak('${p.id}','${b.id}');return false;">Remove</button></div></div>`;
+    const breakNum = arr.filter((x, j) => x.type === 'break' && j <= i).length;
+    const typeLbl = b.type === 'lunch' ? 'Lunch' : (breakNum === 1 ? '1st Break' : '2nd Break');
+    const statusDot = b.status === 'done'
+      ? `<span class="modal-break-status done">✓ Done</span>`
+      : b.status === 'active' ? `<span class="modal-break-status active">▶ Active</span>`
+      : b.status === 'overdue' ? `<span class="modal-break-status overdue">⚠ Overdue</span>`
+      : `<span class="modal-break-status sched">Scheduled</span>`;
+    const undoBtn = b.status === 'done'
+      ? `<button class="btn-tiny btn-undo" onclick="event.stopPropagation();undoBreak('${p.id}','${b.id}');return false;">Undo</button>`
+      : '';
+    return `<div class="modal-break-row" style="display:flex;gap:8px;align-items:center;margin-top:8px"><div style="flex:1"><strong>${typeLbl}</strong> ${statusDot}<div style="font-size:12px;color:var(--gray-400)">Scheduled: ${tval}</div></div><div style="width:38%"><input id="modal-break-time-${b.id}" class="form-input" value="${tval}"></div><div style="width:20%"><input id="modal-break-dur-${b.id}" class="form-input" value="${b.dur || (b.type==='lunch'?BREAK_DUR['lunch']:15)}"></div><div style="display:flex;flex-direction:column;gap:3px">${undoBtn}<button class="btn-tiny" onclick="event.stopPropagation();removeBreak('${p.id}','${b.id}');return false;">Remove</button></div></div>`;
   }).join('');
 
   let statusLabel = '';
@@ -1295,6 +1305,21 @@ function toggleAbsent(personId) {
   if (p.absent) pushAlert({ type: 'urgent', msg: `${p.name} marked absent` });
   saveState(); render();
   if (p.absent) cancelScheduledNotificationsForPerson(p.id);
+}
+
+function undoBreak(personId, breakId) {
+  const p = people.find(x => x.id === personId);
+  if (!p) return;
+  const b = p.breaks && p.breaks.find(x => x.id === breakId);
+  if (!b || b.status !== 'done') return;
+  const label = b.type === 'lunch' ? 'Lunch' : b.type === 'break' ? '1st/2nd break' : b.type;
+  b.status = 'scheduled';
+  b.startMs = null;
+  syncPersonStatus(p);
+  saveState();
+  showToast(`${p.name} — ${label} undone`);
+  render();
+  openModal(personId);
 }
 
 function markReturned(personId) {
